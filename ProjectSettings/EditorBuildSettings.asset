@@ -8,12 +8,18 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/Scenes/VR Scene.unity
     guid: 93a590788af8e464bb8ed7e65b78c43f
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/Bowlling VR.unity
     guid: 23feda562e6ae7e4aad8982d43616e82
   - enabled: 0
     path: Assets/Samples/XR Interaction Toolkit/2.6.4/Starter Assets/DemoScene.unity
     guid: 319dafa5c80f29f428dc1e0d03f04177
+  - enabled: 0
+    path: Assets/MarioParadiso/Demo/DemoScene.unity
+    guid: e544e9bc911851047a3c0ca4770df192
+  - enabled: 1
+    path: Assets/Scenes/VR Scene 1.unity
+    guid: a7985e5b92c884b4da5507e252dffd93
   m_configObjects:
     Unity.XR.Oculus.Settings: {fileID: 11400000, guid: ce18139cfa441194ebbca9060709159d,
       type: 2}
