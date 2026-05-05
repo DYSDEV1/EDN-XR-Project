@@ -1969,6 +1969,11 @@ PrefabInstance:
       propertyPath: m_StaticEditorFlags
       value: 2147483647
       objectReference: {fileID: 0}
+    - target: {fileID: 8299241497586130233, guid: 5efd643db1db3bf4691f69bc76676524,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0.005
+      objectReference: {fileID: 0}
     - target: {fileID: 8584136449213160615, guid: 5efd643db1db3bf4691f69bc76676524,
         type: 3}
       propertyPath: m_StaticEditorFlags
@@ -2603,117 +2608,6 @@ GameObject:
     type: 3}
   m_PrefabInstance: {fileID: 691713788}
   m_PrefabAsset: {fileID: 0}
---- !u!1001 &209053376
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 221280984}
-    m_Modifications:
-    - target: {fileID: 7271704851483378559, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_Name
-      value: SuctionCup
-      objectReference: {fileID: 0}
-    - target: {fileID: 7271704851483378559, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_StaticEditorFlags
-      value: 2147483647
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalPosition.x
-      value: 5.8519998
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0.958
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalPosition.z
-      value: -2.455
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 0.7071068
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalRotation.x
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalRotation.y
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0.7071068
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 90
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents:
-    - targetCorrespondingSourceObject: {fileID: 7271704851483378559, guid: 5b9c013bf66560846987e4d4bf2ab441,
-        type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 209053379}
-  m_SourcePrefab: {fileID: 100100000, guid: 5b9c013bf66560846987e4d4bf2ab441, type: 3}
---- !u!4 &209053377 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 8043879345868413381, guid: 5b9c013bf66560846987e4d4bf2ab441,
-    type: 3}
-  m_PrefabInstance: {fileID: 209053376}
-  m_PrefabAsset: {fileID: 0}
---- !u!1 &209053378 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 7271704851483378559, guid: 5b9c013bf66560846987e4d4bf2ab441,
-    type: 3}
-  m_PrefabInstance: {fileID: 209053376}
-  m_PrefabAsset: {fileID: 0}
---- !u!64 &209053379
-MeshCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 209053378}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 5
-  m_Convex: 0
-  m_CookingOptions: 30
-  m_Mesh: {fileID: -5208879343037863941, guid: 250ed3fe3b5ebaa48abfd50fa102c611, type: 3}
 --- !u!1001 &216870793
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2985,7 +2879,6 @@ Transform:
   - {fileID: 108115681}
   - {fileID: 989790585}
   - {fileID: 1115108824}
-  - {fileID: 209053377}
   - {fileID: 1038105174}
   - {fileID: 1364534446}
   - {fileID: 192460440}
@@ -17555,12 +17448,40 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   targetRecipe: {fileID: 0}
   feedbackText: {fileID: 1603571544}
+  outputSpawnPoint: {fileID: 0}
+  defaultElectronSpawnOrigin: {fileID: 0}
+  workbenchSpawnA: {fileID: 0}
+  workbenchSpawnB: {fileID: 0}
+  workbenchAName: WorkBench (3)
+  workbenchBName: WorkBench (4)
+  workbenchSpawnOffset: {x: 0, y: 0.55, z: 0}
+  workbenchColumnSpacing: {x: 0.14, y: 0, z: 0}
+  workbenchRowSpacing: {x: 0, y: 0, z: 0.14}
+  workbenchColumns: 6
   protonVisual: {fileID: 345649409}
   protonSpawnPoint: {fileID: 722482575}
-  requiredQuarkUp: 2
-  requiredQuarkDown: 2
+  spawnDefaultQuarksOnStart: 1
+  defaultQuarkUpCount: 6
+  defaultQuarkDownCount: 6
+  quarkRadius: 0.055
+  defaultQuarkSpawnOrigin: {fileID: 0}
+  defaultQuarkStartOffset: {x: -0.42, y: 0.18, z: -0.12}
+  defaultQuarkSpacing: {x: 0.12, y: 0, z: 0}
+  spawnDefaultElectronsOnStart: 1
+  defaultElectronCount: 2
+  electronRadius: 0.045
+  defaultElectronStartOffset: {x: -0.22, y: 0.18, z: 0.18}
+  defaultElectronSpacing: {x: 0.14, y: 0, z: 0}
   consumeIngredientOnEnter: 1
   successDelay: 1
+  clearSpawnedOutputsOnReset: 0
+  requireTimingMiniGame: 1
+  timingSuccessesRequired: 3
+  cursorSpeed: 1.4
+  successZoneCenter: 0.5
+  successZoneSize: 0.22
+  timingKey: 32
+  resetProgressOnMiss: 1
   onRecipeCompleted:
     m_PersistentCalls:
       m_Calls:
