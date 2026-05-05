@@ -814,7 +814,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: c35362c04cb2cea4e8146215abc01c3a,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: -0.005
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: c35362c04cb2cea4e8146215abc01c3a,
         type: 3}
@@ -17557,6 +17557,8 @@ MonoBehaviour:
   feedbackText: {fileID: 1603571544}
   protonVisual: {fileID: 345649409}
   protonSpawnPoint: {fileID: 722482575}
+  requiredQuarkUp: 2
+  requiredQuarkDown: 2
   consumeIngredientOnEnter: 1
   successDelay: 1
   onRecipeCompleted:
@@ -21191,7 +21193,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 5.05, y: 0}
+  m_AnchoredPosition: {x: 3.131, y: 0}
   m_SizeDelta: {x: 5, y: 5}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1603571544
