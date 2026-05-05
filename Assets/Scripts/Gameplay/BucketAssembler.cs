@@ -191,17 +191,19 @@ namespace EDNXR.Gameplay
             if (ingredient.IsConsumed) return;
             if (protectedRecipeOutputs.Contains(ingredient.gameObject)) return;
 
-            AddIngredient(ingredient);
+            ParticlePacket packet = other.GetComponent<ParticlePacket>();
+            AddIngredient(ingredient, packet);
         }
 
-        private void AddIngredient(IngredientBall ingredient)
+        private void AddIngredient(IngredientBall ingredient, ParticlePacket packet)
         {
-            IngredientType type = ingredient.Type;
+            IngredientType type = packet != null ? packet.Type : ingredient.Type;
+            int amount = packet != null ? packet.Count : 1;
 
             if (!currentCounts.ContainsKey(type))
                 currentCounts[type] = 0;
 
-            currentCounts[type]++;
+            currentCounts[type] += amount;
 
             if (consumeIngredientOnEnter)
                 ingredient.Consume();
