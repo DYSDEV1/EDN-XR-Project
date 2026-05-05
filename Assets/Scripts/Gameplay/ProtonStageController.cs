@@ -1,8 +1,4 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-
-using TMPro;
+ï»¿using TMPro;
 using UnityEngine;
 
 namespace EDNXR.Gameplay
@@ -21,12 +17,7 @@ namespace EDNXR.Gameplay
 
         private void Start()
         {
-            if (instructionText != null)
-            {
-                instructionText.text =
-                    "Étape 1 : Construis un proton.\n" +
-                    "Dépose 2 quarks Up (rouges) et 1 quark Down (bleu) dans le seau.";
-            }
+            SetRecipeInstructions();
 
             if (protonVisual != null)
                 protonVisual.SetActive(false);
@@ -37,19 +28,8 @@ namespace EDNXR.Gameplay
             if (instructionText != null)
             {
                 instructionText.text =
-                    "Bravo ! Tu as créé un proton.\n" +
-                    "Un proton contient 2 quarks Up et 1 quark Down.";
-            }
-
-            if (protonVisual != null)
-            {
-                protonVisual.SetActive(true);
-
-                if (protonSpawnPoint != null)
-                {
-                    protonVisual.transform.position = protonSpawnPoint.position;
-                    protonVisual.transform.rotation = protonSpawnPoint.rotation;
-                }
+                    "Recette reussie !\n" +
+                    "La nouvelle particule est apparue sur la workbench.";
             }
         }
 
@@ -83,12 +63,19 @@ namespace EDNXR.Gameplay
             if (protonVisual != null)
                 protonVisual.SetActive(false);
 
-            if (instructionText != null)
-            {
-                instructionText.text =
-                    "Étape 1 : Construis un proton.\n" +
-                    "Dépose 2 quarks Up (rouges) et 1 quark Down (bleu) dans le seau.";
-            }
+            SetRecipeInstructions();
+        }
+
+        private void SetRecipeInstructions()
+        {
+            if (instructionText == null)
+                return;
+
+            instructionText.text =
+                "Recettes disponibles :\n" +
+                "Proton = 2 Up + 1 Down (uud)\n" +
+                "Neutron = 1 Up + 2 Down (udd)\n" +
+                "Helium = 2 Protons + 2 Neutrons + 2 Electrons.";
         }
     }
 }

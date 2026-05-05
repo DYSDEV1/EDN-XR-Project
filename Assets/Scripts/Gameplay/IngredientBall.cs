@@ -1,8 +1,4 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace EDNXR.Gameplay
 {
@@ -18,9 +14,43 @@ namespace EDNXR.Gameplay
 
         private bool isConsumed = false;
 
-        public IngredientType Type => ingredientType;
-        public string DisplayName => displayName;
+        public IngredientType Type => ResolveType();
+        public string DisplayName => string.IsNullOrWhiteSpace(displayName) ? Type.ToString() : displayName;
         public bool IsConsumed => isConsumed;
+
+        public void Configure(IngredientType type, string newDisplayName)
+        {
+            ingredientType = type;
+            displayName = newDisplayName;
+            isConsumed = false;
+        }
+
+        private IngredientType ResolveType()
+        {
+            string objectName = gameObject.name;
+
+            if (objectName.IndexOf("QuarkDown", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.QuarkDown;
+
+            if (objectName.IndexOf("QuarkUp", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.QuarkUp;
+
+            if (objectName.IndexOf("Electron", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.Electron;
+
+            if (objectName.IndexOf("Proton", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.Proton;
+
+            if (objectName.IndexOf("Neutron", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.Neutron;
+
+            if (objectName.IndexOf("Helium", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || objectName.IndexOf("Helium", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || objectName.IndexOf("Atom", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.Atom;
+
+            return ingredientType;
+        }
 
         public void Consume()
         {
