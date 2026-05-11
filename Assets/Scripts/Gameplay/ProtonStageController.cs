@@ -75,7 +75,8 @@ namespace EDNXR.Gameplay
                 "Recettes disponibles :\n" +
                 "Proton = 2 Up + 1 Down (uud)\n" +
                 "Neutron = 1 Up + 2 Down (udd)\n" +
-                "Helium = 2 Protons + 2 Neutrons + 2 Electrons.";
+                "Helium = 2 Protons + 2 Neutrons + 2 Electrons\n" +
+                "Uranium = 92 Protons + 146 Neutrons + 92 Electrons.";
         }
     }
 }

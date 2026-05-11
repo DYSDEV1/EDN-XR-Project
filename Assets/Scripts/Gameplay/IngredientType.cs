@@ -12,6 +12,7 @@ namespace EDNXR.Gameplay
         Electron = 3,
         Proton = 4,
         Neutron = 5,
-        Atom = 6
+        Atom = 6,
+        Uranium = 7
     }
 }

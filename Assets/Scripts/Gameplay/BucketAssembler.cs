@@ -1,13 +1,14 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Collections;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.Events;
 using UnityEngine.XR.Interaction.Toolkit;
+using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
-
 namespace EDNXR.Gameplay
 {
     public class BucketAssembler : MonoBehaviour
@@ -68,14 +69,14 @@ namespace EDNXR.Gameplay
         [SerializeField] private Transform protonSpawnPoint;
 
         [Header("Default Starting Particles")]
-        [SerializeField] private bool spawnDefaultQuarksOnStart = true;
+        [SerializeField] private bool spawnDefaultQuarksOnStart = false;
         [SerializeField] private int defaultQuarkUpCount = 6;
         [SerializeField] private int defaultQuarkDownCount = 6;
         [SerializeField] private float quarkRadius = 0.055f;
         [SerializeField] private Transform defaultQuarkSpawnOrigin;
         [SerializeField] private Vector3 defaultQuarkStartOffset = new Vector3(-0.42f, 0.18f, -0.12f);
         [SerializeField] private Vector3 defaultQuarkSpacing = new Vector3(0.12f, 0f, 0f);
-        [SerializeField] private bool spawnDefaultElectronsOnStart = true;
+        [SerializeField] private bool spawnDefaultElectronsOnStart = false;
         [SerializeField] private int defaultElectronCount = 2;
         [SerializeField] private float electronRadius = 0.045f;
         [SerializeField] private Vector3 defaultElectronStartOffset = new Vector3(-0.22f, 0.18f, 0.18f);
@@ -83,17 +84,44 @@ namespace EDNXR.Gameplay
 
         [Header("Settings")]
         [SerializeField] private bool consumeIngredientOnEnter = true;
+        [SerializeField] private bool requireMixerToolPress = true;
+        [SerializeField] private string mixerToolName = "PaintCan";
+        [SerializeField] private float mixerPressCooldown = 0.45f;
         [SerializeField] private float successDelay = 0.2f;
         [SerializeField] private bool clearSpawnedOutputsOnReset = false;
 
-        [Header("Timing Mini Game - saved for later")]
-        [SerializeField] private bool requireTimingMiniGame = false;
-        [SerializeField] private int timingSuccessesRequired = 3;
-        [SerializeField] private float cursorSpeed = 1.4f;
-        [SerializeField, Range(0f, 1f)] private float successZoneCenter = 0.5f;
-        [SerializeField, Range(0.05f, 0.8f)] private float successZoneSize = 0.22f;
-        [SerializeField] private KeyCode timingKey = KeyCode.Space;
-        [SerializeField] private bool resetProgressOnMiss = true;
+        [Header("Recipe Mini Game")]
+        [SerializeField] private float shakeMiniGameDuration = 5f;
+        [SerializeField] private int requiredShakeDirectionChanges = 4;
+        [SerializeField] private float requiredShakeTravel = 0.45f;
+        [SerializeField] private float shakeDirectionThreshold = 0.035f;
+        [SerializeField] private string mixingClipName = "melange";
+        [SerializeField] private float mixingClipVolume = 0.9f;
+        [SerializeField, Range(0f, 1f)] private float coolingMiniGameChance = 0f;
+        [SerializeField] private float coolingMiniGameDuration = 5f;
+        [SerializeField, Range(0f, 1f)] private float timingMiniGameChance = 0f;
+        [SerializeField] private float timingMiniGameDuration = 4f;
+        [SerializeField] private int timingMiniGameSteps = 3;
+        [SerializeField] private float timingCursorSpeed = 1.4f;
+        [SerializeField, Range(0.05f, 0.8f)] private float timingGreenZoneSize = 0.22f;
+        [SerializeField] private string timingSuccessClipName = "success";
+        [SerializeField] private float timingSuccessClipDuration = 1.4f;
+        [SerializeField] private float timingSuccessClipVolume = 0.9f;
+        [SerializeField, Range(0f, 1f)] private float memoryMiniGameChance = 1f;
+        [SerializeField] private float memoryRevealDuration = 2f;
+        [SerializeField] private float memorySolveDuration = 8f;
+
+        [Header("Wrong Recipe Explosion")]
+        [SerializeField] private float explosionEffectHeight = 0.45f;
+        [SerializeField] private float explosionEffectDuration = 0.75f;
+        [SerializeField] private float explosionEffectRadius = 0.6f;
+        [SerializeField] private float explosionVolume = 0.75f;
+
+        [Header("Bucket Contents Label")]
+        [SerializeField] private Vector3 contentsLabelOffset = new Vector3(0f, 0.30f, 0f);
+        [SerializeField] private float contentsLabelFontSize = 0.32f;
+        [SerializeField] private float absorbRadius = 1.25f;
+        [SerializeField] private float absorbScanInterval = 0.12f;
 
         [Header("Events")]
         public UnityEvent onRecipeCompleted;
@@ -102,19 +130,58 @@ namespace EDNXR.Gameplay
         private readonly Dictionary<IngredientType, int> currentCounts = new();
         private readonly List<GameObject> spawnedOutputs = new();
         private readonly HashSet<GameObject> protectedRecipeOutputs = new();
+        private static readonly HashSet<IngredientType> completedRecipeOutputs = new();
         private CraftRecipe[] builtInRecipes;
-        private CraftRecipe pendingRecipe;
-        private bool timingMiniGameActive = false;
-        private int timingSuccessCount = 0;
-        private float cursorPosition = 0f;
-        private int cursorDirection = 1;
-        private bool xrTimingButtonWasHeld = false;
         private int workbenchSpawnIndex = 0;
+        private AudioClip generatedExplosionClip;
+        private float nextMixerPressTime = 0f;
+        private TMP_Text contentsLabel;
+        private float nextAbsorbScanTime = 0f;
+        private float startupGraceEndTime = 0f;
+        private bool isDead = false;
+        private Text deathTextUI;
+        private Transform originalCameraParent;
+        private Vector3 originalCameraLocalPos;
+        private Quaternion originalCameraLocalRot;
+        private bool isPaintCanTriggerZone = false;
+        private float nextTriggerDebugLogTime = 0f;
+        private Vector3 lastTriggerDebugPosition;
+        private bool isRecipeMiniGameActive = false;
+        private Coroutine recipeMiniGameRoutine;
+        private AudioSource mixingAudioSource;
+        private AudioClip mixingClip;
+        private AudioClip timingSuccessClip;
+        private bool leftTimingButtonWasPressed;
+        private bool rightTimingButtonWasPressed;
+        private bool memoryMiniGameInputActive;
+        private int memoryMiniGameExpectedStep;
+        private int memoryMiniGameSelectedCell = -1;
 
-        private const int TimingBarSegments = 21;
+        private enum ShakeAxis
+        {
+            Horizontal,
+            Vertical
+        }
+
+        private enum FollowUpMiniGame
+        {
+            None,
+            Cooling,
+            Timing,
+            Memory
+        }
 
         private void Awake()
         {
+            Debug.Log($"[BucketAssembler] Awake on '{name}' (parent: {(transform.parent != null ? transform.parent.name : "none")})");
+            startupGraceEndTime = Time.time + 3f;
+            spawnDefaultQuarksOnStart = false;
+            spawnDefaultElectronsOnStart = false;
+            contentsLabelOffset = new Vector3(0f, 0.3f, 0f);
+            contentsLabelFontSize = 0.42f;
+            // Keep absorbRadius small to avoid consuming quarks already on the table
+            absorbRadius = Mathf.Clamp(absorbRadius, 0.1f, 0.4f);
+
             builtInRecipes = new[]
             {
                 new CraftRecipe(
@@ -144,12 +211,40 @@ namespace EDNXR.Gameplay
                     new RecipeEntry(IngredientType.Proton, 2),
                     new RecipeEntry(IngredientType.Neutron, 2),
                     new RecipeEntry(IngredientType.Electron, 2)),
+
+                new CraftRecipe(
+                    "Uranium",
+                    "92p + 146n + 92e",
+                    IngredientType.Uranium,
+                    new Color(0.35f, 1f, 0.25f),
+                    0.22f,
+                    new RecipeEntry(IngredientType.Proton, 92),
+                    new RecipeEntry(IngredientType.Neutron, 146),
+                    new RecipeEntry(IngredientType.Electron, 92)),
             };
+
+            mixingClip = Resources.Load<AudioClip>(mixingClipName);
+
+            if (mixingClip == null)
+                Debug.LogWarning($"[BucketAssembler] Mixing sound not found. Expected Assets/Resources/{mixingClipName}.mp3");
+
+            timingSuccessClip = Resources.Load<AudioClip>(timingSuccessClipName);
+
+            if (timingSuccessClip == null)
+                Debug.LogWarning($"[BucketAssembler] Timing success sound not found. Expected Assets/Resources/{timingSuccessClipName}.mp3");
         }
 
         private void Start()
         {
+            // Allow manual mixing by clicking
+            requireMixerToolPress = true;
+
+            DestroyPrePlacedIngredients();
+            EnsureTriggerSetup();
+            EnsureWaterTriggers();
             ResolveWorkbenchSpawnPoints();
+            BuildContentsLabel();
+            Debug.Log($"[BucketAssembler] Start on '{name}'. Absorb radius: {absorbRadius}, position: {transform.position}");
 
             if (outputSpawnPoint == null)
                 outputSpawnPoint = workbenchSpawnA != null ? workbenchSpawnA : protonSpawnPoint;
@@ -166,32 +261,330 @@ namespace EDNXR.Gameplay
             UpdateFeedback();
         }
 
-        private void Update()
+        private void OnDestroy()
         {
-            if (!timingMiniGameActive)
+            StopMixingSound();
+            DestroyContentsLabel();
+        }
+
+        /// <summary>
+        /// Removes all pre-placed IngredientBall objects from the scene at startup.
+        /// Only spawned quarks from the worktable should exist.
+        /// </summary>
+        private void DestroyPrePlacedIngredients()
+        {
+            IngredientBall[] existing = FindObjectsOfType<IngredientBall>(true);
+            int removed = 0;
+
+            for (int i = 0; i < existing.Length; i++)
+            {
+                if (existing[i] == null)
+                    continue;
+
+                Debug.Log($"[BucketAssembler] Removing pre-placed ingredient: '{existing[i].name}'");
+                Destroy(existing[i].gameObject);
+                removed++;
+            }
+
+            if (removed > 0)
+                Debug.Log($"[BucketAssembler] Removed {removed} pre-placed ingredient(s)");
+        }
+
+        private void EnsureTriggerSetup()
+        {
+            isPaintCanTriggerZone = transform.parent != null
+                && IsPaintCanName(transform.parent.name);
+
+            Collider[] colliders = GetComponents<Collider>();
+            bool hasTrigger = false;
+
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i].isTrigger)
+                {
+                    hasTrigger = true;
+                }
+            }
+
+            if (!hasTrigger)
+            {
+                BoxCollider trigger = gameObject.AddComponent<BoxCollider>();
+                trigger.isTrigger = true;
+                Debug.Log($"[BucketAssembler] Added trigger BoxCollider to {name}");
+            }
+
+            if (isPaintCanTriggerZone)
+            {
+                Rigidbody triggerBody = GetComponent<Rigidbody>();
+                if (triggerBody != null)
+                {
+                    Destroy(triggerBody);
+                    Debug.Log($"[BucketAssembler] Removed Rigidbody from paintcan TriggerZone '{name}'");
+                }
+            }
+            else
+            {
+                // Ensure a Rigidbody exists on THIS object (required for OnTriggerEnter)
+                Rigidbody rb = GetComponent<Rigidbody>();
+                if (rb == null)
+                {
+                    rb = gameObject.AddComponent<Rigidbody>();
+                    Debug.Log($"[BucketAssembler] Added kinematic Rigidbody to {name}");
+                }
+                rb.isKinematic = true;
+                rb.useGravity = false;
+            }
+
+            // Also ensure parent has a Rigidbody (for compound collider setups)
+            if (transform.parent != null && !isPaintCanTriggerZone)
+            {
+                Rigidbody parentRb = transform.parent.GetComponent<Rigidbody>();
+                if (parentRb == null)
+                {
+                    parentRb = transform.parent.gameObject.AddComponent<Rigidbody>();
+                    Debug.Log($"[BucketAssembler] Added kinematic Rigidbody to parent {transform.parent.name}");
+                }
+
+                // Force it to be kinematic to prevent falling through the floor
+                parentRb.isKinematic = true;
+                parentRb.useGravity = false;
+            }
+
+            lastTriggerDebugPosition = transform.position;
+            Debug.Log($"[BucketAssembler] Trigger setup complete. name='{name}', parent='{(transform.parent != null ? transform.parent.name : "none")}', isPaintCanTriggerZone={isPaintCanTriggerZone}, position={transform.position}, localPosition={transform.localPosition}, colliders={GetComponents<Collider>().Length}, hasRigidbody={GetComponent<Rigidbody>() != null}");
+        }
+
+        private void EnsureWaterTriggers()
+        {
+            Collider[] colliders = FindObjectsOfType<Collider>(true);
+            int changed = 0;
+
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] == null || !IsWaterObject(colliders[i].transform))
+                    continue;
+
+                if (!colliders[i].isTrigger)
+                {
+                    colliders[i].isTrigger = true;
+                    changed++;
+                }
+            }
+
+            if (changed > 0)
+                Debug.Log($"[BucketAssembler] Converted {changed} water collider(s) to triggers so PaintCan can pass through.");
+        }
+
+        private bool IsWaterObject(Transform source)
+        {
+            Transform current = source;
+
+            while (current != null)
+            {
+                string objectName = current.name;
+
+                if (!string.IsNullOrWhiteSpace(objectName)
+                    && objectName.StartsWith("Eau", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
+        private void LateUpdate()
+        {
+            if (contentsLabel == null || Camera.main == null)
                 return;
 
-            UpdateTimingCursor();
+            contentsLabel.transform.position = transform.position + contentsLabelOffset;
+            Vector3 directionToCamera = contentsLabel.transform.position - Camera.main.transform.position;
 
-            if (TimingButtonWasPressed())
+            if (directionToCamera.sqrMagnitude > 0.0001f)
+                contentsLabel.transform.rotation = Quaternion.LookRotation(directionToCamera.normalized, Vector3.up);
+        }
+
+        private void Update()
+        {
+            DebugPaintCanTriggerZone();
+
+            if (isDead)
             {
-                PressTimingButton();
+                bool pressed = false;
+#if ENABLE_INPUT_SYSTEM
+                if (Keyboard.current != null && Keyboard.current.anyKey.wasPressedThisFrame)
+                    pressed = true;
+                if (Mouse.current != null && (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame))
+                    pressed = true;
+#else
+                if (Input.anyKeyDown)
+                    pressed = true;
+#endif
+                if (pressed)
+                {
+                    if (deathTextUI != null)
+                        deathTextUI.text = "Chargement en cours...";
+                    RestartScene();
+                }
                 return;
             }
 
-            UpdateTimingFeedback(null);
+            if (Time.time < startupGraceEndTime)
+                return;
+
+            ScanForIngredientsNearBucket();
+        }
+
+        private void DebugPaintCanTriggerZone()
+        {
+            if (!isPaintCanTriggerZone || Time.time < nextTriggerDebugLogTime)
+                return;
+
+            nextTriggerDebugLogTime = Time.time + 1f;
+
+            Rigidbody ownRb = GetComponent<Rigidbody>();
+            Rigidbody parentRb = transform.parent != null ? transform.parent.GetComponent<Rigidbody>() : null;
+            XRGrabInteractable parentGrab = transform.parent != null ? transform.parent.GetComponent<XRGrabInteractable>() : null;
+            Collider[] ownColliders = GetComponents<Collider>();
+            float fallDistance = lastTriggerDebugPosition.y - transform.position.y;
+            lastTriggerDebugPosition = transform.position;
+
+            Debug.Log(
+                "[BucketAssembler] PaintCan TriggerZone debug | " +
+                $"trigger='{name}' pos={transform.position} local={transform.localPosition} " +
+                $"fallSinceLast={fallDistance:F3} hasOwnRb={ownRb != null} " +
+                $"parent='{(transform.parent != null ? transform.parent.name : "none")}' " +
+                $"parentPos={(transform.parent != null ? transform.parent.position.ToString() : "none")} " +
+                $"parentRb={(parentRb != null ? $"kinematic={parentRb.isKinematic}, gravity={parentRb.useGravity}" : "none")} " +
+                $"parentGrab={(parentGrab != null ? $"yes, colliders={parentGrab.colliders.Count}" : "none")} " +
+                $"ownColliders={ownColliders.Length} label={(contentsLabel != null ? contentsLabel.transform.position.ToString() : "none")}");
+        }
+
+        private void ScanForIngredientsNearBucket()
+        {
+            if (Time.time < nextAbsorbScanTime)
+                return;
+
+            nextAbsorbScanTime = Time.time + absorbScanInterval;
+            Bounds absorbBounds = GetAbsorbBounds();
+            Collider[] colliders = Physics.OverlapBox(
+                absorbBounds.center,
+                absorbBounds.extents,
+                Quaternion.identity,
+                ~0,
+                QueryTriggerInteraction.Collide);
+
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] == null || colliders[i].transform == transform)
+                    continue;
+
+                if (IsMixerTool(colliders[i]))
+                    continue;
+
+                ProcessIngredientCollider(colliders[i]);
+            }
+
+            ScanIngredientComponentsByDistance(absorbBounds);
+        }
+
+        private void ScanIngredientComponentsByDistance(Bounds absorbBounds)
+        {
+            IngredientBall[] ingredients = FindObjectsOfType<IngredientBall>();
+
+            for (int i = 0; i < ingredients.Length; i++)
+            {
+                if (ingredients[i] == null || ingredients[i].IsConsumed)
+                    continue;
+
+                if (protectedRecipeOutputs.Contains(ingredients[i].gameObject))
+                    continue;
+
+                Vector3 position = ingredients[i].transform.position;
+
+                if (!absorbBounds.Contains(position))
+                    continue;
+
+                ParticlePacket packet = ingredients[i].GetComponentInParent<ParticlePacket>();
+                AddIngredient(ingredients[i], packet);
+            }
+        }
+
+        private Bounds GetAbsorbBounds()
+        {
+            Collider[] ownColliders = GetComponentsInChildren<Collider>();
+
+            if (ownColliders.Length == 0)
+                return new Bounds(transform.position, Vector3.one * (absorbRadius * 2f));
+
+            Bounds bounds = ownColliders[0].bounds;
+
+            for (int i = 1; i < ownColliders.Length; i++)
+                bounds.Encapsulate(ownColliders[i].bounds);
+
+            bounds.Expand(absorbRadius);
+            return bounds;
         }
 
         private void OnTriggerEnter(Collider other)
         {
-            if (timingMiniGameActive) return;
+            if (Time.time < startupGraceEndTime) return;
+            Debug.Log($"[BucketAssembler] OnTriggerEnter: {other.name} (root: {other.transform.root.name})");
+            ProcessTriggerCollider(other);
+        }
+
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (Time.time < startupGraceEndTime) return;
+            Debug.Log($"[BucketAssembler] OnCollisionEnter: {collision.collider.name} (root: {collision.transform.root.name})");
+            ProcessIngredientCollider(collision.collider);
+        }
+
+        private void OnTriggerStay(Collider other)
+        {
+            if (Time.time < startupGraceEndTime) return;
+
+            ProcessIngredientCollider(other);
+        }
+
+        private void ProcessTriggerCollider(Collider other)
+        {
+            if (IsCardboxBaseCollider(other))
+                return;
+
+            if (IsMixerTool(other))
+            {
+                TryMixCurrentContents();
+                return;
+            }
+
+            ProcessIngredientCollider(other);
+        }
+
+        private void ProcessIngredientCollider(Collider other)
+        {
+            if (IsCardboxBaseCollider(other))
+                return;
 
             IngredientBall ingredient = GetValidIngredient(other);
-            if (ingredient == null) return;
-            if (ingredient.IsConsumed) return;
-            if (protectedRecipeOutputs.Contains(ingredient.gameObject)) return;
+            if (ingredient == null)
+                return;
+            if (ingredient.IsConsumed)
+            {
+                Debug.Log($"[BucketAssembler] Ingredient already consumed: {ingredient.DisplayName}");
+                return;
+            }
+            if (protectedRecipeOutputs.Contains(ingredient.gameObject))
+            {
+                Debug.Log($"[BucketAssembler] Ingredient is protected output: {ingredient.DisplayName}");
+                return;
+            }
 
-            ParticlePacket packet = other.GetComponent<ParticlePacket>();
+            Debug.Log($"[BucketAssembler] Consuming ingredient: {ingredient.DisplayName} (type={ingredient.Type})");
+            ParticlePacket packet = GetParticlePacket(other);
             AddIngredient(ingredient, packet);
         }
 
@@ -204,40 +597,1166 @@ namespace EDNXR.Gameplay
                 currentCounts[type] = 0;
 
             currentCounts[type] += amount;
+            Debug.Log($"Bucket absorbed {amount} x {type}. {BuildCurrentContentsText()}");
 
             if (consumeIngredientOnEnter)
                 ingredient.Consume();
+
+            UpdateContentsLabel();
+
+            if (requireMixerToolPress)
+            {
+                SetText("Ingredients ajoutes. Appuie sur le recipient avec une PaintCan pour melanger.\n" + BuildCurrentContentsText());
+                return;
+            }
+
+            TryMixCurrentContents();
+        }
+
+        public void TryMixCurrentContents()
+        {
+            if (isRecipeMiniGameActive)
+            {
+                SetText("Mini-jeu en cours : secoue la PaintCan horizontalement.");
+                return;
+            }
+
+            nextMixerPressTime = Time.time + mixerPressCooldown;
+
+            if (currentCounts.Count == 0)
+            {
+                SetText("Le recipient est vide. Ajoute des particules avant de melanger.");
+                return;
+            }
 
             CraftRecipe matchingRecipe = FindMatchingRecipe();
 
             if (matchingRecipe != null)
             {
-                CompleteCraft(matchingRecipe);
+                if (IsRecipeAlreadyKnown(matchingRecipe))
+                {
+                    SetText($"Recette deja faite : {matchingRecipe.displayName}. Tu ne peux pas refaire la meme recette deux fois.\n" + BuildCurrentContentsText());
+                    Debug.Log($"[BucketAssembler] Duplicate recipe ignored before mini-game: {matchingRecipe.displayName} ({matchingRecipe.outputType}).");
+                    return;
+                }
+
+                StartRecipeMiniGame(matchingRecipe);
                 return;
             }
 
             if (!CanStillMatchAnyRecipe())
             {
-                SetText("Aucune recette avec cette combinaison. Appuie sur Reset.");
-                onWrongRecipe?.Invoke();
+                FailRecipeWithExplosion("Mauvaise recette ! Explosion.");
                 return;
             }
 
-            UpdateFeedback();
+            SetText("Recette incomplete. Ajoute les bonnes particules puis melange encore.\n" + BuildCurrentContentsText());
+        }
+
+        private void StartRecipeMiniGame(CraftRecipe recipe)
+        {
+            GameObject paintCan = ResolveOwningPaintCan();
+
+            if (paintCan == null)
+            {
+                Debug.LogWarning("[BucketAssembler] Cannot start shake mini-game: owning PaintCan not found. Completing craft directly.");
+                CompleteCraft(recipe);
+                return;
+            }
+
+            if (recipeMiniGameRoutine != null)
+                StopCoroutine(recipeMiniGameRoutine);
+
+            recipeMiniGameRoutine = StartCoroutine(RecipeShakeMiniGameRoutine(recipe, paintCan.transform));
+        }
+
+        private IEnumerator RecipeShakeMiniGameRoutine(CraftRecipe recipe, Transform shakeTarget)
+        {
+            isRecipeMiniGameActive = true;
+            ShakeAxis shakeAxis = Random.value < 0.5f ? ShakeAxis.Horizontal : ShakeAxis.Vertical;
+            float endTime = Time.time + shakeMiniGameDuration;
+            Vector3 previousPosition = shakeTarget.position;
+            float previousDirection = 0f;
+            float totalTravel = 0f;
+            int shakeCount = 0;
+            PlayMixingSound(shakeTarget.position);
+
+            Debug.Log($"[BucketAssembler] Shake mini-game started for {recipe.displayName}. axis={shakeAxis}, duration={shakeMiniGameDuration}s target={shakeTarget.name}");
+
+            while (Time.time < endTime && shakeTarget != null)
+            {
+                Vector3 currentPosition = shakeTarget.position;
+                Vector3 delta = currentPosition - previousPosition;
+                float axisDelta = shakeAxis == ShakeAxis.Horizontal
+                    ? new Vector2(delta.x, delta.z).magnitude * Mathf.Sign(Mathf.Abs(delta.x) >= Mathf.Abs(delta.z) ? delta.x : delta.z)
+                    : delta.y;
+
+                float distance = Mathf.Abs(axisDelta);
+
+                if (distance >= shakeDirectionThreshold)
+                {
+                    float direction = Mathf.Sign(axisDelta);
+                    totalTravel += distance;
+
+                    if (Mathf.Abs(previousDirection) > 0.01f && !Mathf.Approximately(previousDirection, direction))
+                        shakeCount++;
+
+                    previousDirection = direction;
+                    previousPosition = currentPosition;
+                }
+
+                float remaining = Mathf.Max(0f, endTime - Time.time);
+                SetMiniGameText(shakeAxis, remaining, shakeCount, totalTravel);
+
+                if (shakeCount >= requiredShakeDirectionChanges && totalTravel >= requiredShakeTravel)
+                {
+                    StopMixingSound();
+                    Debug.Log($"[BucketAssembler] Shake mini-game succeeded. axis={shakeAxis}, shakes={shakeCount}, travel={totalTravel:F2}");
+
+                    FollowUpMiniGame followUpMiniGame = ChooseFollowUpMiniGame();
+                    Debug.Log($"[BucketAssembler] Follow-up mini-game selected: {followUpMiniGame}");
+
+                    if (followUpMiniGame == FollowUpMiniGame.Cooling)
+                    {
+                        bool cooled = false;
+                        yield return CoolingMiniGameRoutine(shakeTarget, value => cooled = value);
+
+                        if (!cooled)
+                        {
+                            isRecipeMiniGameActive = false;
+                            recipeMiniGameRoutine = null;
+                            FailRecipeWithExplosion("Refroidissement rate ! La recette explose.");
+                            yield break;
+                        }
+                    }
+                    else if (followUpMiniGame == FollowUpMiniGame.Timing)
+                    {
+                        bool timed = false;
+                        yield return TimingMiniGameRoutine(shakeTarget, value => timed = value);
+
+                        if (!timed)
+                        {
+                            isRecipeMiniGameActive = false;
+                            recipeMiniGameRoutine = null;
+                            FailRecipeWithExplosion("Timing rate ! La recette explose.");
+                            yield break;
+                        }
+                    }
+                    else if (followUpMiniGame == FollowUpMiniGame.Memory)
+                    {
+                        bool memorized = false;
+                        yield return MemoryMiniGameRoutine(shakeTarget, value => memorized = value);
+
+                        if (!memorized)
+                        {
+                            isRecipeMiniGameActive = false;
+                            recipeMiniGameRoutine = null;
+                            FailRecipeWithExplosion("Memoire ratee ! La recette explose.");
+                            yield break;
+                        }
+                    }
+
+                    isRecipeMiniGameActive = false;
+                    recipeMiniGameRoutine = null;
+                    CompleteCraft(recipe);
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            isRecipeMiniGameActive = false;
+            recipeMiniGameRoutine = null;
+            StopMixingSound();
+            Debug.Log($"[BucketAssembler] Shake mini-game failed. axis={shakeAxis}, shakes={shakeCount}, travel={totalTravel:F2}");
+            FailRecipeWithExplosion("Mini-jeu rate ! La recette explose.");
+        }
+
+        private FollowUpMiniGame ChooseFollowUpMiniGame()
+        {
+            float timingChance = Mathf.Clamp01(timingMiniGameChance);
+            float coolingChance = Mathf.Clamp01(coolingMiniGameChance);
+            float memoryChance = Mathf.Clamp01(memoryMiniGameChance);
+            float totalChance = timingChance + coolingChance + memoryChance;
+
+            if (totalChance <= 0.001f)
+                return FollowUpMiniGame.None;
+
+            float roll = Random.value * totalChance;
+
+            if (roll < timingChance)
+                return FollowUpMiniGame.Timing;
+
+            if (roll < timingChance + coolingChance)
+                return FollowUpMiniGame.Cooling;
+
+            return FollowUpMiniGame.Memory;
+        }
+
+        private IEnumerator CoolingMiniGameRoutine(Transform paintCan, System.Action<bool> onCompleted)
+        {
+            float endTime = Time.time + coolingMiniGameDuration;
+            Debug.Log($"[BucketAssembler] Cooling mini-game started. target={paintCan.name}, duration={coolingMiniGameDuration}s");
+
+            while (Time.time < endTime && paintCan != null)
+            {
+                float remaining = Mathf.Max(0f, endTime - Time.time);
+                SetCoolingMiniGameText(remaining);
+
+                if (IsPaintCanInWater(paintCan))
+                {
+                    Debug.Log("[BucketAssembler] Cooling mini-game succeeded.");
+                    onCompleted?.Invoke(true);
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            Debug.LogWarning("[BucketAssembler] Cooling mini-game failed.");
+            onCompleted?.Invoke(false);
+        }
+
+        private IEnumerator TimingMiniGameRoutine(Transform paintCan, System.Action<bool> onCompleted)
+        {
+            int totalSteps = Mathf.Max(1, timingMiniGameSteps);
+
+            for (int step = 1; step <= totalSteps; step++)
+            {
+                bool stepSucceeded = false;
+                yield return TimingMiniGameStepRoutine(paintCan, step, totalSteps, value => stepSucceeded = value);
+
+                if (!stepSucceeded)
+                {
+                    onCompleted?.Invoke(false);
+                    yield break;
+                }
+
+                PlayTimingSuccessSound(paintCan != null ? paintCan.position : transform.position);
+
+                if (step < totalSteps)
+                {
+                    SetText($"Timing reussi {step}/{totalSteps} !");
+                    yield return new WaitForSeconds(0.25f);
+                }
+            }
+
+            onCompleted?.Invoke(true);
+        }
+
+        private IEnumerator TimingMiniGameStepRoutine(Transform paintCan, int step, int totalSteps, System.Action<bool> onCompleted)
+        {
+            float endTime = Time.time + timingMiniGameDuration;
+            float cursor = 0f;
+            int cursorDirection = 1;
+            float greenZoneCenter = Random.Range(timingGreenZoneSize * 0.5f, 1f - timingGreenZoneSize * 0.5f);
+            GameObject timingBar = BuildTimingBar(paintCan, greenZoneCenter, out Transform cursorTransform);
+
+            Debug.Log($"[BucketAssembler] Timing mini-game step {step}/{totalSteps} started. duration={timingMiniGameDuration}s, greenCenter={greenZoneCenter:F2}, greenSize={timingGreenZoneSize:F2}");
+
+            while (Time.time < endTime && paintCan != null)
+            {
+                cursor += cursorDirection * timingCursorSpeed * Time.deltaTime;
+
+                if (cursor >= 1f)
+                {
+                    cursor = 1f;
+                    cursorDirection = -1;
+                }
+                else if (cursor <= 0f)
+                {
+                    cursor = 0f;
+                    cursorDirection = 1;
+                }
+
+                UpdateTimingBar(timingBar, cursorTransform, paintCan, cursor);
+                float remaining = Mathf.Max(0f, endTime - Time.time);
+                SetTimingMiniGameText(remaining, step, totalSteps);
+
+                if (MiniGameInteractPressedThisFrame())
+                {
+                    bool success = Mathf.Abs(cursor - greenZoneCenter) <= timingGreenZoneSize * 0.5f;
+                    Destroy(timingBar);
+                    Debug.Log($"[BucketAssembler] Timing mini-game step {step}/{totalSteps} input. cursor={cursor:F2}, success={success}");
+                    onCompleted?.Invoke(success);
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            Destroy(timingBar);
+            Debug.LogWarning($"[BucketAssembler] Timing mini-game step {step}/{totalSteps} failed: timeout.");
+            onCompleted?.Invoke(false);
+        }
+
+        private IEnumerator MemoryMiniGameRoutine(Transform paintCan, System.Action<bool> onCompleted)
+        {
+            int[] sequence = BuildMemorySequence();
+            GameObject grid = BuildMemoryGrid(paintCan, sequence, true, out MemoryMiniGameCell[] cells, out TMP_Text[] labels);
+            memoryMiniGameInputActive = false;
+            memoryMiniGameExpectedStep = 0;
+            memoryMiniGameSelectedCell = -1;
+
+            Debug.Log($"[BucketAssembler] Memory mini-game reveal started. sequence={string.Join(",", sequence)} reveal={memoryRevealDuration}s");
+
+            float revealEnd = Time.time + memoryRevealDuration;
+
+            while (Time.time < revealEnd && paintCan != null)
+            {
+                UpdateMemoryGrid(grid, paintCan);
+                SetMemoryMiniGameText(Mathf.Max(0f, revealEnd - Time.time), 0, sequence.Length, true);
+                yield return null;
+            }
+
+            SetMemoryGridHidden(cells, labels);
+            memoryMiniGameInputActive = true;
+            float solveEnd = Time.time + memorySolveDuration;
+
+            while (Time.time < solveEnd && paintCan != null)
+            {
+                UpdateMemoryGrid(grid, paintCan);
+                SetMemoryMiniGameText(Mathf.Max(0f, solveEnd - Time.time), memoryMiniGameExpectedStep, sequence.Length, false);
+
+                if (MiniGameInteractPressedThisFrame())
+                    TrySelectMemoryCellFromAim();
+
+                if (memoryMiniGameSelectedCell >= 0)
+                {
+                    int selectedCell = memoryMiniGameSelectedCell;
+                    memoryMiniGameSelectedCell = -1;
+
+                    if (selectedCell != sequence[memoryMiniGameExpectedStep])
+                    {
+                        Destroy(grid);
+                        memoryMiniGameInputActive = false;
+                        Debug.LogWarning($"[BucketAssembler] Memory mini-game failed. selected={selectedCell}, expected={sequence[memoryMiniGameExpectedStep]}, step={memoryMiniGameExpectedStep + 1}");
+                        onCompleted?.Invoke(false);
+                        yield break;
+                    }
+
+                    SetMemoryCellSolved(cells[selectedCell], labels[selectedCell], memoryMiniGameExpectedStep + 1);
+                    memoryMiniGameExpectedStep++;
+
+                    if (memoryMiniGameExpectedStep >= sequence.Length)
+                    {
+                        Destroy(grid);
+                        memoryMiniGameInputActive = false;
+                        Debug.Log("[BucketAssembler] Memory mini-game succeeded.");
+                        onCompleted?.Invoke(true);
+                        yield break;
+                    }
+                }
+
+                yield return null;
+            }
+
+            Destroy(grid);
+            memoryMiniGameInputActive = false;
+            Debug.LogWarning("[BucketAssembler] Memory mini-game failed: timeout.");
+            onCompleted?.Invoke(false);
+        }
+
+        public void SelectMemoryMiniGameCell(int cellIndex)
+        {
+            if (!memoryMiniGameInputActive)
+                return;
+
+            memoryMiniGameSelectedCell = cellIndex;
+        }
+
+        private bool TrySelectMemoryCellFromAim()
+        {
+            if (TrySelectMemoryCellFromCamera())
+                return true;
+
+            return TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.RightHand)
+                || TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.LeftHand);
+        }
+
+        private bool TrySelectMemoryCellFromCamera()
+        {
+            Camera camera = Camera.main;
+
+            if (camera == null)
+                return false;
+
+            Ray ray = new Ray(camera.transform.position, camera.transform.forward);
+            return TrySelectMemoryCellFromRay(ray);
+        }
+
+        private bool TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode node)
+        {
+            UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+
+            if (!device.isValid)
+                return false;
+
+            if (!device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.devicePosition, out Vector3 position))
+                return false;
+
+            if (!device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.deviceRotation, out Quaternion rotation))
+                return false;
+
+            return TrySelectMemoryCellFromRay(new Ray(position, rotation * Vector3.forward));
+        }
+
+        private bool TrySelectMemoryCellFromRay(Ray ray)
+        {
+            RaycastHit[] hits = Physics.RaycastAll(ray, 8f, ~0, QueryTriggerInteraction.Collide);
+
+            if (hits == null || hits.Length == 0)
+                return false;
+
+            MemoryMiniGameCell bestCell = null;
+            float bestDistance = float.MaxValue;
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                MemoryMiniGameCell cell = hits[i].collider != null
+                    ? hits[i].collider.GetComponentInParent<MemoryMiniGameCell>()
+                    : null;
+
+                if (cell == null || hits[i].distance >= bestDistance)
+                    continue;
+
+                bestCell = cell;
+                bestDistance = hits[i].distance;
+            }
+
+            if (bestCell == null)
+                return false;
+
+            SelectMemoryMiniGameCell(bestCell.CellIndex);
+            return true;
+        }
+
+        private int[] BuildMemorySequence()
+        {
+            List<int> available = new List<int>();
+
+            for (int i = 0; i < 9; i++)
+                available.Add(i);
+
+            int[] sequence = new int[4];
+
+            for (int i = 0; i < sequence.Length; i++)
+            {
+                int pick = Random.Range(0, available.Count);
+                sequence[i] = available[pick];
+                available.RemoveAt(pick);
+            }
+
+            return sequence;
+        }
+
+        private GameObject BuildMemoryGrid(Transform followTarget, int[] sequence, bool showSequence, out MemoryMiniGameCell[] cells, out TMP_Text[] labels)
+        {
+            GameObject root = new GameObject("Recipe Memory Mini Game");
+            cells = new MemoryMiniGameCell[9];
+            labels = new TMP_Text[9];
+
+            for (int i = 0; i < 9; i++)
+            {
+                int row = i / 3;
+                int col = i % 3;
+                GameObject cell = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cell.name = $"Memory Cell {i}";
+                cell.transform.SetParent(root.transform, false);
+                cell.transform.localPosition = new Vector3((col - 1) * 0.16f, (1 - row) * 0.16f, 0f);
+                cell.transform.localScale = new Vector3(0.13f, 0.13f, 0.012f);
+
+                Renderer renderer = cell.GetComponent<Renderer>();
+                if (renderer != null)
+                {
+                    Material material = new Material(Shader.Find("Standard"));
+                    material.color = Color.red;
+                    renderer.material = material;
+                }
+
+                cells[i] = cell.AddComponent<MemoryMiniGameCell>();
+                cells[i].Configure(this, i);
+
+                GameObject labelObject = new GameObject($"Memory Cell Label {i}");
+                labelObject.transform.SetParent(cell.transform, false);
+                labelObject.transform.localPosition = new Vector3(0f, 0f, -0.55f);
+                labelObject.transform.localScale = Vector3.one * 0.16f;
+                TMP_Text label = labelObject.AddComponent<TextMeshPro>();
+                label.alignment = TextAlignmentOptions.Center;
+                label.fontStyle = FontStyles.Bold;
+                label.fontSize = 5.5f;
+                label.color = Color.white;
+                label.text = "";
+                label.rectTransform.sizeDelta = new Vector2(1.2f, 1.2f);
+                labels[i] = label;
+            }
+
+            if (showSequence)
+            {
+                for (int i = 0; i < sequence.Length; i++)
+                    SetMemoryCellRevealed(cells[sequence[i]], labels[sequence[i]], i + 1);
+            }
+
+            UpdateMemoryGrid(root, followTarget);
+            return root;
+        }
+
+        private void UpdateMemoryGrid(GameObject root, Transform followTarget)
+        {
+            if (root == null || followTarget == null)
+                return;
+
+            root.transform.position = followTarget.position + Vector3.up * 0.55f;
+
+            Camera camera = Camera.main;
+            if (camera != null)
+            {
+                Vector3 toGrid = root.transform.position - camera.transform.position;
+
+                if (toGrid.sqrMagnitude > 0.001f)
+                    root.transform.rotation = Quaternion.LookRotation(toGrid.normalized, Vector3.up);
+            }
+        }
+
+        private void SetMemoryGridHidden(MemoryMiniGameCell[] cells, TMP_Text[] labels)
+        {
+            for (int i = 0; i < cells.Length; i++)
+                SetMemoryCellColor(cells[i], labels[i], Color.red, "");
+        }
+
+        private void SetMemoryCellRevealed(MemoryMiniGameCell cell, TMP_Text label, int number)
+        {
+            SetMemoryCellColor(cell, label, Color.green, number.ToString());
+        }
+
+        private void SetMemoryCellSolved(MemoryMiniGameCell cell, TMP_Text label, int number)
+        {
+            SetMemoryCellColor(cell, label, new Color(0.1f, 0.65f, 1f), number.ToString());
+        }
+
+        private void SetMemoryCellColor(MemoryMiniGameCell cell, TMP_Text label, Color color, string text)
+        {
+            if (cell != null)
+            {
+                Renderer renderer = cell.GetComponent<Renderer>();
+                if (renderer != null)
+                    renderer.material.color = color;
+            }
+
+            if (label != null)
+                label.text = text;
+        }
+
+        private void SetMiniGameText(ShakeAxis shakeAxis, float remaining, int shakeCount, float travel)
+        {
+            string axisText = shakeAxis == ShakeAxis.Horizontal ? "horizontalement" : "verticalement";
+            string titleText = shakeAxis == ShakeAxis.Horizontal ? "SECOUE HORIZONTAL" : "SECOUE VERTICAL";
+            string message =
+                $"Secoue {axisText} ! {remaining:F1}s\n" +
+                $"Allers-retours : {shakeCount}/{requiredShakeDirectionChanges}";
+
+            SetText(message);
+
+            if (contentsLabel != null)
+            {
+                contentsLabel.text =
+                    $"{titleText}\n" +
+                    $"{remaining:F1}s\n" +
+                    $"{shakeCount}/{requiredShakeDirectionChanges}";
+            }
+        }
+
+        private void SetCoolingMiniGameText(float remaining)
+        {
+            SetText($"Refroidir !!! {remaining:F1}s\nMets la PaintCan dans l'eau.");
+
+            if (contentsLabel != null)
+            {
+                contentsLabel.text =
+                    "REFROIDIR !!!\n" +
+                    "DANS L'EAU\n" +
+                    $"{remaining:F1}s";
+            }
+        }
+
+        private void SetTimingMiniGameText(float remaining, int step, int totalSteps)
+        {
+            SetText($"Timing {step}/{totalSteps} ! {remaining:F1}s\nAppuie sur E quand la barre blanche est dans le vert.");
+
+            if (contentsLabel != null)
+            {
+                contentsLabel.text =
+                    $"TIMING {step}/{totalSteps}\n" +
+                    "E DANS LE VERT\n" +
+                    $"{remaining:F1}s";
+            }
+        }
+
+        private void SetMemoryMiniGameText(float remaining, int currentStep, int totalSteps, bool reveal)
+        {
+            if (reveal)
+            {
+                SetText($"Memoire ! Observe le schema. {remaining:F1}s");
+
+                if (contentsLabel != null)
+                    contentsLabel.text = $"MEMOIRE\nOBSERVE\n{remaining:F1}s";
+
+                return;
+            }
+
+            SetText($"Memoire ! Reproduis le schema. {remaining:F1}s\nVise une case puis appuie sur E/A.");
+
+            if (contentsLabel != null)
+            {
+                contentsLabel.text =
+                    "MEMOIRE\n" +
+                    $"{currentStep}/{totalSteps}\n" +
+                    $"{remaining:F1}s";
+            }
+        }
+
+        private GameObject BuildTimingBar(Transform followTarget, float greenZoneCenter, out Transform cursorTransform)
+        {
+            GameObject root = new GameObject("Recipe Timing Mini Game");
+            cursorTransform = null;
+
+            GameObject redBar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            redBar.name = "Timing Red Bar";
+            redBar.transform.SetParent(root.transform, false);
+            redBar.transform.localPosition = Vector3.zero;
+            redBar.transform.localScale = new Vector3(1.1f, 0.035f, 0.035f);
+            SetRendererColor(redBar, Color.red);
+            DestroyCollider(redBar);
+
+            GameObject greenZone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            greenZone.name = "Timing Green Zone";
+            greenZone.transform.SetParent(root.transform, false);
+            greenZone.transform.localPosition = new Vector3(Mathf.Lerp(-0.55f, 0.55f, greenZoneCenter), 0.002f, 0f);
+            greenZone.transform.localScale = new Vector3(1.1f * timingGreenZoneSize, 0.04f, 0.04f);
+            SetRendererColor(greenZone, Color.green);
+            DestroyCollider(greenZone);
+
+            GameObject cursor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cursor.name = "Timing White Cursor";
+            cursor.transform.SetParent(root.transform, false);
+            cursor.transform.localPosition = new Vector3(-0.55f, 0.018f, 0f);
+            cursor.transform.localScale = new Vector3(0.035f, 0.075f, 0.06f);
+            SetRendererColor(cursor, Color.white);
+            DestroyCollider(cursor);
+            cursorTransform = cursor.transform;
+
+            UpdateTimingBar(root, cursorTransform, followTarget, 0f);
+            return root;
+        }
+
+        private void UpdateTimingBar(GameObject root, Transform cursorTransform, Transform followTarget, float cursor)
+        {
+            if (root == null || followTarget == null)
+                return;
+
+            root.transform.position = followTarget.position + Vector3.up * 0.55f;
+
+            Camera camera = Camera.main;
+            if (camera != null)
+            {
+                Vector3 directionToCamera = root.transform.position - camera.transform.position;
+
+                if (directionToCamera.sqrMagnitude > 0.0001f)
+                    root.transform.rotation = Quaternion.LookRotation(directionToCamera.normalized, Vector3.up);
+            }
+
+            if (cursorTransform != null)
+                cursorTransform.localPosition = new Vector3(Mathf.Lerp(-0.55f, 0.55f, cursor), 0.018f, 0f);
+        }
+
+        private void SetRendererColor(GameObject target, Color color)
+        {
+            Renderer renderer = target.GetComponent<Renderer>();
+
+            if (renderer == null)
+                return;
+
+            Material material = new Material(Shader.Find("Standard"));
+            material.color = color;
+            renderer.material = material;
+        }
+
+        private void DestroyCollider(GameObject target)
+        {
+            Collider collider = target.GetComponent<Collider>();
+
+            if (collider != null)
+                Destroy(collider);
+        }
+
+        private bool MiniGameInteractPressedThisFrame()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
+                return true;
+
+            if (Gamepad.current != null && Gamepad.current.buttonSouth.wasPressedThisFrame)
+                return true;
+#endif
+
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(KeyCode.E)
+                || Input.GetKeyDown(KeyCode.JoystickButton0)
+                || Input.GetKeyDown(KeyCode.JoystickButton14)
+                || Input.GetKeyDown(KeyCode.JoystickButton15))
+            {
+                return true;
+            }
+#endif
+
+            return XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode.LeftHand, ref leftTimingButtonWasPressed)
+                || XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode.RightHand, ref rightTimingButtonWasPressed);
+        }
+
+        private bool XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode node, ref bool wasPressed)
+        {
+            UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+
+            if (!device.isValid)
+            {
+                wasPressed = false;
+                return false;
+            }
+
+            bool pressed;
+
+            if (!device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out pressed))
+                pressed = false;
+
+            bool pressedThisFrame = pressed && !wasPressed;
+            wasPressed = pressed;
+            return pressedThisFrame;
+        }
+
+        private bool IsPaintCanInWater(Transform paintCan)
+        {
+            Bounds paintCanBounds = GetTransformWorldBounds(paintCan);
+            Collider[] waterColliders = FindWaterColliders();
+
+            for (int i = 0; i < waterColliders.Length; i++)
+            {
+                Collider waterCollider = waterColliders[i];
+
+                if (waterCollider == null || !waterCollider.enabled)
+                    continue;
+
+                if (waterCollider.bounds.Intersects(paintCanBounds)
+                    || waterCollider.bounds.Contains(paintCan.position))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private Collider[] FindWaterColliders()
+        {
+            Collider[] allColliders = FindObjectsOfType<Collider>(true);
+            List<Collider> waterColliders = new List<Collider>();
+
+            for (int i = 0; i < allColliders.Length; i++)
+            {
+                if (allColliders[i] != null && IsWaterObject(allColliders[i].transform))
+                    waterColliders.Add(allColliders[i]);
+            }
+
+            return waterColliders.ToArray();
+        }
+
+        private Bounds GetTransformWorldBounds(Transform target)
+        {
+            Collider[] colliders = target.GetComponentsInChildren<Collider>(true);
+
+            if (colliders.Length > 0)
+            {
+                Bounds bounds = colliders[0].bounds;
+
+                for (int i = 1; i < colliders.Length; i++)
+                    bounds.Encapsulate(colliders[i].bounds);
+
+                return bounds;
+            }
+
+            Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+
+            if (renderers.Length > 0)
+            {
+                Bounds bounds = renderers[0].bounds;
+
+                for (int i = 1; i < renderers.Length; i++)
+                    bounds.Encapsulate(renderers[i].bounds);
+
+                return bounds;
+            }
+
+            return new Bounds(target.position, Vector3.one * 0.2f);
+        }
+
+        private void PlayMixingSound(Vector3 position)
+        {
+            if (mixingClip == null)
+                mixingClip = Resources.Load<AudioClip>(mixingClipName);
+
+            if (mixingClip == null)
+                return;
+
+            if (mixingAudioSource == null)
+            {
+                GameObject audioObject = new GameObject("Recipe Mixing Audio");
+                mixingAudioSource = audioObject.AddComponent<AudioSource>();
+                mixingAudioSource.playOnAwake = false;
+                mixingAudioSource.loop = true;
+                mixingAudioSource.spatialBlend = 1f;
+            }
+
+            mixingAudioSource.transform.position = position;
+            mixingAudioSource.clip = mixingClip;
+            mixingAudioSource.volume = mixingClipVolume;
+            mixingAudioSource.Play();
+        }
+
+        private void StopMixingSound()
+        {
+            if (mixingAudioSource == null)
+                return;
+
+            mixingAudioSource.Stop();
+            Destroy(mixingAudioSource.gameObject);
+            mixingAudioSource = null;
+        }
+
+        private void PlayTimingSuccessSound(Vector3 position)
+        {
+            if (timingSuccessClip == null)
+                timingSuccessClip = Resources.Load<AudioClip>(timingSuccessClipName);
+
+            if (timingSuccessClip == null)
+                return;
+
+            GameObject audioObject = new GameObject("Timing Success Audio");
+            audioObject.transform.position = position;
+
+            AudioSource audioSource = audioObject.AddComponent<AudioSource>();
+            audioSource.playOnAwake = false;
+            audioSource.loop = false;
+            audioSource.spatialBlend = 1f;
+            audioSource.volume = timingSuccessClipVolume;
+            audioSource.clip = timingSuccessClip;
+            audioSource.Play();
+
+            StartCoroutine(StopAndDestroyAudioAfterDelay(audioSource, timingSuccessClipDuration));
+        }
+
+        private IEnumerator StopAndDestroyAudioAfterDelay(AudioSource audioSource, float delay)
+        {
+            yield return new WaitForSeconds(Mathf.Max(0.01f, delay));
+
+            if (audioSource == null)
+                yield break;
+
+            audioSource.Stop();
+            Destroy(audioSource.gameObject);
+        }
+
+        private void FailRecipeWithExplosion(string message)
+        {
+            SetText(message);
+            SpawnWrongRecipeEffect();
+            currentCounts.Clear();
+            UpdateContentsLabel();
+            onWrongRecipe?.Invoke();
+            
+            isDead = true;
+
+            // Detach and move camera to third person
+            Camera mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                originalCameraParent = mainCam.transform.parent;
+                originalCameraLocalPos = mainCam.transform.localPosition;
+                originalCameraLocalRot = mainCam.transform.localRotation;
+
+                mainCam.transform.SetParent(null);
+                mainCam.transform.position = transform.position + new Vector3(0f, 2.5f, -3f);
+                mainCam.transform.LookAt(transform.position);
+
+                // Disable player controllers if they exist
+                PcPlayerController controller = FindObjectOfType<PcPlayerController>();
+                if (controller != null) controller.enabled = false;
+
+                PcMouseGrabber grabber = FindObjectOfType<PcMouseGrabber>();
+                if (grabber != null) grabber.enabled = false;
+            }
+
+            CreateDeathScreenUI();
+        }
+
+        private void CreateDeathScreenUI()
+        {
+            GameObject canvasObj = new GameObject("DeathCanvas");
+            Canvas canvas = canvasObj.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvasObj.AddComponent<CanvasScaler>();
+            canvasObj.AddComponent<GraphicRaycaster>();
+
+            GameObject bgObj = new GameObject("RedBackground");
+            bgObj.transform.SetParent(canvasObj.transform, false);
+            Image bgImage = bgObj.AddComponent<Image>();
+            bgImage.color = new Color(0.8f, 0f, 0f, 0.45f);
+            RectTransform bgRect = bgObj.GetComponent<RectTransform>();
+            bgRect.anchorMin = Vector2.zero;
+            bgRect.anchorMax = Vector2.one;
+            bgRect.sizeDelta = Vector2.zero;
+
+            GameObject textObj = new GameObject("DeathText");
+            textObj.transform.SetParent(canvasObj.transform, false);
+            deathTextUI = textObj.AddComponent<Text>();
+            deathTextUI.text = "VOUS ÊTES MORT\nAppuyez sur une touche pour réapparaître";
+            deathTextUI.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            deathTextUI.fontSize = 48;
+            deathTextUI.alignment = TextAnchor.MiddleCenter;
+            deathTextUI.color = Color.white;
+            deathTextUI.gameObject.AddComponent<Outline>().effectColor = Color.black;
+            
+            RectTransform textRect = textObj.GetComponent<RectTransform>();
+            textRect.anchorMin = new Vector2(0.1f, 0.1f);
+            textRect.anchorMax = new Vector2(0.9f, 0.9f);
+            textRect.sizeDelta = Vector2.zero;
+        }
+
+        private void RestartScene()
+        {
+            if (deathTextUI != null && deathTextUI.canvas != null)
+            {
+                Destroy(deathTextUI.canvas.gameObject);
+            }
+
+            Camera mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                mainCam.transform.SetParent(originalCameraParent, false);
+                mainCam.transform.localPosition = originalCameraLocalPos;
+                mainCam.transform.localRotation = originalCameraLocalRot;
+            }
+
+            PcPlayerController controller = FindObjectOfType<PcPlayerController>(true);
+            if (controller != null) controller.enabled = true;
+
+            PcMouseGrabber grabber = FindObjectOfType<PcMouseGrabber>(true);
+            if (grabber != null) grabber.enabled = true;
+
+            IngredientBall[] allBalls = FindObjectsOfType<IngredientBall>(true);
+            foreach (var ball in allBalls) Destroy(ball.gameObject);
+
+            ParticlePacket[] packets = FindObjectsOfType<ParticlePacket>(true);
+            foreach (var packet in packets) Destroy(packet.gameObject);
+
+            GameObject wakeupHost = new GameObject("Wakeup Intro Controller");
+            wakeupHost.AddComponent<WakeupIntroController>();
+
+            isDead = false;
+        }
+
+        private bool IsMixerTool(Collider other)
+        {
+            Transform current = other.transform;
+
+            while (current != null)
+            {
+                if (IsPaintCanName(current.name))
+                    return true;
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
+        private bool IsPaintCanName(string objectName)
+        {
+            if (string.IsNullOrWhiteSpace(objectName))
+                return false;
+
+            string normalizedObjectName = objectName.Replace(" ", "");
+            string normalizedMixerName = string.IsNullOrWhiteSpace(mixerToolName)
+                ? "PaintCan"
+                : mixerToolName.Replace(" ", "");
+
+            return normalizedObjectName.StartsWith("PaintCan", System.StringComparison.OrdinalIgnoreCase)
+                || normalizedObjectName.StartsWith(normalizedMixerName, System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void SpawnWrongRecipeEffect()
+        {
+            Vector3 position = transform.position + Vector3.up * explosionEffectHeight;
+
+            GameObject effectObject = new GameObject("Wrong Recipe Explosion");
+            effectObject.transform.position = position;
+
+            ParticleSystem particles = effectObject.AddComponent<ParticleSystem>();
+            ParticleSystemRenderer psRenderer = effectObject.GetComponent<ParticleSystemRenderer>();
+            Shader particleShader = Shader.Find("Legacy Shaders/Particles/Additive");
+            if (particleShader == null) particleShader = Shader.Find("Particles/Standard Unlit");
+            if (particleShader == null) particleShader = Shader.Find("Standard");
+            
+            if (particleShader != null)
+            {
+                Material particleMat = new Material(particleShader);
+                psRenderer.material = particleMat;
+            }
+            ParticleSystem.MainModule main = particles.main;
+            main.duration = explosionEffectDuration;
+            main.loop = false;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.8f, 1.5f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(5f, 15f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.5f, 1.5f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.4f, 0.05f), new Color(0.1f, 0.1f, 0.1f));
+            main.gravityModifier = 0.05f;
+
+            ParticleSystem.EmissionModule emission = particles.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 150) });
+
+            ParticleSystem.ShapeModule shape = particles.shape;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius = explosionEffectRadius * 0.8f;
+
+            Light flash = effectObject.AddComponent<Light>();
+            flash.type = LightType.Point;
+            flash.color = new Color(1f, 0.3f, 0.0f);
+            flash.range = explosionEffectRadius * 8f;
+            flash.intensity = 8f;
+
+            AudioClip c4Clip = Resources.Load<AudioClip>("c4_explode1_19");
+            if (c4Clip != null)
+                AudioSource.PlayClipAtPoint(c4Clip, position, explosionVolume * 2f);
+            else
+                AudioSource.PlayClipAtPoint(GetExplosionClip(), position, explosionVolume);
+
+            Destroy(effectObject, explosionEffectDuration + 2f);
+            StartCoroutine(FadeExplosionLight(flash));
+        }
+
+        private IEnumerator FadeExplosionLight(Light flash)
+        {
+            float startIntensity = flash != null ? flash.intensity : 0f;
+            float elapsed = 0f;
+
+            while (flash != null && elapsed < explosionEffectDuration)
+            {
+                elapsed += Time.deltaTime;
+                flash.intensity = Mathf.Lerp(startIntensity, 0f, elapsed / explosionEffectDuration);
+                yield return null;
+            }
+        }
+
+        private AudioClip GetExplosionClip()
+        {
+            if (generatedExplosionClip != null)
+                return generatedExplosionClip;
+
+            const int sampleRate = 44100;
+            int sampleCount = Mathf.RoundToInt(sampleRate * 0.45f);
+            float[] samples = new float[sampleCount];
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = i / (float)sampleRate;
+                float envelope = Mathf.Exp(-t * 7.5f);
+                float noise = Random.Range(-1f, 1f);
+                float thump = Mathf.Sin(2f * Mathf.PI * 55f * t) * Mathf.Exp(-t * 11f);
+                samples[i] = Mathf.Clamp((noise * 0.65f + thump) * envelope, -1f, 1f);
+            }
+
+            generatedExplosionClip = AudioClip.Create("GeneratedExplosion", sampleCount, 1, sampleRate, false);
+            generatedExplosionClip.SetData(samples, 0);
+            return generatedExplosionClip;
         }
 
         private void CompleteCraft(CraftRecipe recipe)
         {
-            if (requireTimingMiniGame)
+            if (recipe.outputType == IngredientType.Uranium)
             {
-                StartTimingMiniGame(recipe);
-                return;
+                SpawnUraniumAtPaintCan(recipe);
+                UraniumDeliveryObjectiveController.NotifyUraniumCreated();
+                SetText($"Recette reussie : {recipe.displayName} ({recipe.formula}) produit.");
+            }
+            else
+            {
+                bool wasAlreadyKnown = IsRecipeAlreadyKnown(recipe);
+                WorktableParticleSpawner.Instance?.UnlockParticle(recipe.outputType);
+                SetText(wasAlreadyKnown
+                    ? $"Recette reussie : {recipe.displayName} ({recipe.formula}) validee."
+                    : $"Recette reussie : {recipe.displayName} ({recipe.formula}) debloquee sur la worktable.");
             }
 
-            SpawnRecipeOutput(recipe);
             currentCounts.Clear();
-            SetText($"Recette reussie : {recipe.displayName} ({recipe.formula}) cree sur la workbench.");
-            Invoke(nameof(CompleteRecipe), successDelay);
+            completedRecipeOutputs.Add(recipe.outputType);
+            UpdateContentsLabel();
+            onRecipeCompleted?.Invoke();
+            DestroyOwningPaintCan();
+        }
+
+        private bool IsRecipeAlreadyKnown(CraftRecipe recipe)
+        {
+            return completedRecipeOutputs.Contains(recipe.outputType)
+                || WorktableParticleSpawner.IsParticleUnlocked(recipe.outputType);
+        }
+
+        private void SpawnUraniumAtPaintCan(CraftRecipe recipe)
+        {
+            GameObject paintCan = ResolveOwningPaintCan();
+            Vector3 spawnPosition = paintCan != null
+                ? paintCan.transform.position + Vector3.up * 0.35f
+                : transform.position + Vector3.up * 0.35f;
+
+            GameObject output = CreateParticleBall(recipe.displayName, recipe.outputType, recipe.outputColor, recipe.outputRadius, spawnPosition);
+            spawnedOutputs.Add(output);
+            protectedRecipeOutputs.Add(output);
+            StartCoroutine(UnprotectRecipeOutput(output));
+            Debug.Log($"[BucketAssembler] Uranium produced at PaintCan position: {spawnPosition}");
+        }
+
+        private void DestroyOwningPaintCan()
+        {
+            GameObject paintCan = ResolveOwningPaintCan();
+
+            if (paintCan == null)
+                return;
+
+            Debug.Log($"[BucketAssembler] Destroying used paintcan after recipe: {paintCan.name}");
+            DestroyContentsLabel();
+            Destroy(paintCan, successDelay);
+        }
+
+        private void DestroyContentsLabel()
+        {
+            if (contentsLabel == null)
+                return;
+
+            Destroy(contentsLabel.gameObject);
+            contentsLabel = null;
+        }
+
+        private GameObject ResolveOwningPaintCan()
+        {
+            Transform current = transform;
+
+            while (current != null)
+            {
+                if (IsPaintCanName(current.name))
+                    return current.gameObject;
+
+                current = current.parent;
+            }
+
+            return null;
         }
 
         private void SpawnRecipeOutput(CraftRecipe recipe)
@@ -259,18 +1778,36 @@ namespace EDNXR.Gameplay
 
         private GameObject CreateParticleBall(string particleName, IngredientType type, Color color, float radius, Vector3 position)
         {
-            GameObject ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            // Uranium must be a clear grabbable ball spawned on the PaintCan.
+            // The FBX resource has a visual offset in some imports, which can leave only the label visible.
+            GameObject uraniumModel = null;
+
+            GameObject ball = uraniumModel != null
+                ? Instantiate(uraniumModel)
+                : GameObject.CreatePrimitive(PrimitiveType.Sphere);
+
             ball.name = particleName;
             ball.transform.position = position;
-            ball.transform.localScale = Vector3.one * (radius * 2f);
+            ball.transform.localScale = uraniumModel != null ? Vector3.one * 0.25f : Vector3.one * (radius * 2f);
 
-            Renderer renderer = ball.GetComponent<Renderer>();
-            if (renderer != null)
+            if (uraniumModel == null)
             {
-                Material material = new Material(Shader.Find("Standard"));
-                material.color = color;
-                renderer.material = material;
+                Renderer renderer = ball.GetComponent<Renderer>();
+                if (renderer != null)
+                {
+                    Material material = new Material(Shader.Find("Standard"));
+                    material.color = color;
+                    if (type == IngredientType.Uranium)
+                    {
+                        material.color = new Color(0.35f, 1f, 0.25f);
+                        material.SetColor("_EmissionColor", new Color(0.08f, 0.35f, 0.04f));
+                        material.EnableKeyword("_EMISSION");
+                    }
+                    renderer.material = material;
+                }
             }
+
+            EnsureCollider(ball);
 
             Rigidbody rb = ball.AddComponent<Rigidbody>();
             rb.mass = type == IngredientType.Electron ? 0.15f : 0.45f;
@@ -280,10 +1817,83 @@ namespace EDNXR.Gameplay
             IngredientBall ingredient = ball.AddComponent<IngredientBall>();
             ingredient.Configure(type, particleName);
 
-            if (ball.GetComponent<XRGrabInteractable>() == null)
-                ball.AddComponent<XRGrabInteractable>();
+            XRGrabInteractable grabInteractable = ball.GetComponent<XRGrabInteractable>();
 
+            if (grabInteractable == null)
+                grabInteractable = ball.AddComponent<XRGrabInteractable>();
+
+            grabInteractable.movementType = XRBaseInteractable.MovementType.Kinematic;
+
+            CreateParticleQuantityLabel(ball.transform, particleName, 1, radius);
             return ball;
+        }
+
+        private void CreateParticleQuantityLabel(Transform target, string label, int quantity, float radius)
+        {
+            if (target == null)
+                return;
+
+            GameObject labelObject = new GameObject("Particle Quantity Label");
+            float offset = Mathf.Max(radius * 2.8f, 0.24f);
+            labelObject.transform.position = target.position + Vector3.up * offset;
+            labelObject.transform.localScale = Vector3.one;
+            labelObject.AddComponent<PacketQuantityLabel>().Configure(target, offset);
+
+            TextMeshPro text = labelObject.AddComponent<TextMeshPro>();
+            text.text = $"{label} x{Mathf.Max(1, quantity)}";
+            text.fontSize = 0.18f;
+            text.color = Color.white;
+            text.alignment = TextAlignmentOptions.Center;
+            text.fontStyle = FontStyles.Bold;
+            text.enableWordWrapping = false;
+            text.rectTransform.sizeDelta = new Vector2(2.2f, 0.35f);
+        }
+
+        private GameObject LoadUraniumModel()
+        {
+            GameObject model = Resources.Load<GameObject>("UraniumModel");
+
+            if (model != null)
+                return model;
+
+            Object[] loadedAssets = Resources.LoadAll("UraniumModel");
+
+            for (int i = 0; i < loadedAssets.Length; i++)
+            {
+                if (loadedAssets[i] is GameObject loadedModel)
+                    return loadedModel;
+            }
+
+            Debug.LogWarning("[BucketAssembler] UraniumModel not found in Resources. Expected Assets/Resources/UraniumModel.fbx");
+            return null;
+        }
+
+        private void EnsureCollider(GameObject target)
+        {
+            if (target.GetComponentInChildren<Collider>() != null)
+                return;
+
+            BoxCollider collider = target.AddComponent<BoxCollider>();
+            Renderer[] renderers = target.GetComponentsInChildren<Renderer>();
+
+            if (renderers.Length == 0)
+            {
+                collider.size = Vector3.one * 0.25f;
+                return;
+            }
+
+            Bounds bounds = renderers[0].bounds;
+
+            for (int i = 1; i < renderers.Length; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            collider.center = target.transform.InverseTransformPoint(bounds.center);
+            collider.size = Abs(target.transform.InverseTransformVector(bounds.size));
+        }
+
+        private Vector3 Abs(Vector3 value)
+        {
+            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
         }
 
         private Vector3 GetOutputSpawnPosition()
@@ -475,175 +2085,12 @@ namespace EDNXR.Gameplay
             return false;
         }
 
-        private void StartTimingMiniGame(CraftRecipe recipe)
-        {
-            pendingRecipe = recipe;
-            timingMiniGameActive = true;
-            timingSuccessCount = 0;
-            cursorPosition = 0f;
-            cursorDirection = 1;
-            xrTimingButtonWasHeld = false;
-
-            UpdateTimingFeedback("Recette valide ! Mini-jeu garde pour plus tard : appuie quand le curseur est dans la zone verte.");
-        }
-
-        private bool TimingButtonWasPressed()
-        {
-            bool xrButtonIsHeld = IsXRTimingButtonHeld();
-            bool xrButtonWasPressed = xrButtonIsHeld && !xrTimingButtonWasHeld;
-            xrTimingButtonWasHeld = xrButtonIsHeld;
-
-            if (xrButtonWasPressed)
-                return true;
-
-#if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null
-                && (Keyboard.current.spaceKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame))
-            {
-                return true;
-            }
-
-            if (Gamepad.current != null && Gamepad.current.buttonSouth.wasPressedThisFrame)
-                return true;
-#endif
-
-#if ENABLE_LEGACY_INPUT_MANAGER
-            if (Input.GetKeyDown(timingKey)
-                || Input.GetKeyDown(KeyCode.Return)
-                || Input.GetKeyDown(KeyCode.JoystickButton0)
-                || Input.GetKeyDown(KeyCode.JoystickButton14)
-                || Input.GetKeyDown(KeyCode.JoystickButton15))
-            {
-                return true;
-            }
-#endif
-
-            return false;
-        }
-
-        private bool IsXRTimingButtonHeld()
-        {
-            return IsXRControllerButtonHeld(UnityEngine.XR.XRNode.LeftHand)
-                || IsXRControllerButtonHeld(UnityEngine.XR.XRNode.RightHand);
-        }
-
-        private bool IsXRControllerButtonHeld(UnityEngine.XR.XRNode node)
-        {
-            UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
-
-            if (!device.isValid)
-                return false;
-
-            bool pressed;
-
-            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out pressed) && pressed)
-                return true;
-
-            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out pressed) && pressed)
-                return true;
-
-            return false;
-        }
-
-        public void PressTimingButton()
-        {
-            if (!timingMiniGameActive)
-                return;
-
-            if (IsCursorInSuccessZone())
-            {
-                timingSuccessCount++;
-
-                if (timingSuccessCount >= timingSuccessesRequired)
-                {
-                    timingMiniGameActive = false;
-
-                    if (pendingRecipe != null)
-                    {
-                        SpawnRecipeOutput(pendingRecipe);
-                        SetText($"Mini-jeu reussi ! {pendingRecipe.displayName} cree sur la workbench.");
-                    }
-
-                    pendingRecipe = null;
-                    currentCounts.Clear();
-                    Invoke(nameof(CompleteRecipe), successDelay);
-                    return;
-                }
-
-                cursorPosition = 0f;
-                cursorDirection = 1;
-                UpdateTimingFeedback("Reussi !");
-                return;
-            }
-
-            if (resetProgressOnMiss)
-                timingSuccessCount = 0;
-
-            UpdateTimingFeedback("Rate ! Recommence le timing.");
-        }
-
-        private void UpdateTimingCursor()
-        {
-            cursorPosition += Time.deltaTime * cursorSpeed * cursorDirection;
-
-            if (cursorPosition >= 1f)
-            {
-                cursorPosition = 1f;
-                cursorDirection = -1;
-            }
-            else if (cursorPosition <= 0f)
-            {
-                cursorPosition = 0f;
-                cursorDirection = 1;
-            }
-        }
-
-        private bool IsCursorInSuccessZone()
-        {
-            float halfZone = successZoneSize * 0.5f;
-            return cursorPosition >= successZoneCenter - halfZone
-                && cursorPosition <= successZoneCenter + halfZone;
-        }
-
-        private void UpdateTimingFeedback(string prefix)
-        {
-            string message = string.IsNullOrEmpty(prefix) ? string.Empty : prefix + "\n";
-
-            SetText(
-                message +
-                $"Timing {timingSuccessCount}/{timingSuccessesRequired}\n" +
-                BuildTimingBar() +
-                "\nAppuie au bon moment."
-            );
-        }
-
-        private string BuildTimingBar()
-        {
-            int cursorIndex = Mathf.RoundToInt(cursorPosition * (TimingBarSegments - 1));
-            float halfZone = successZoneSize * 0.5f;
-            int zoneStart = Mathf.RoundToInt(Mathf.Clamp01(successZoneCenter - halfZone) * (TimingBarSegments - 1));
-            int zoneEnd = Mathf.RoundToInt(Mathf.Clamp01(successZoneCenter + halfZone) * (TimingBarSegments - 1));
-
-            System.Text.StringBuilder bar = new System.Text.StringBuilder(TimingBarSegments + 2);
-            bar.Append('[');
-
-            for (int i = 0; i < TimingBarSegments; i++)
-            {
-                if (i == cursorIndex)
-                    bar.Append("<color=#FFD400>|</color>");
-                else if (i >= zoneStart && i <= zoneEnd)
-                    bar.Append("<color=#00FF66>O</color>");
-                else
-                    bar.Append("<color=#FF4040>-</color>");
-            }
-
-            bar.Append(']');
-            return bar.ToString();
-        }
-
         private IngredientBall GetValidIngredient(Collider other)
         {
-            IngredientBall[] ingredients = other.GetComponents<IngredientBall>();
+            if (IsCardboxBaseCollider(other))
+                return null;
+
+            IngredientBall[] ingredients = other.GetComponentsInParent<IngredientBall>();
 
             for (int i = 0; i < ingredients.Length; i++)
             {
@@ -651,23 +2098,144 @@ namespace EDNXR.Gameplay
                     return ingredients[i];
             }
 
+            ingredients = other.GetComponentsInChildren<IngredientBall>();
+
+            for (int i = 0; i < ingredients.Length; i++)
+            {
+                if (ingredients[i] != null && ingredients[i].Type != IngredientType.None)
+                    return ingredients[i];
+            }
+
+            if (other.attachedRigidbody != null)
+            {
+                ingredients = other.attachedRigidbody.GetComponentsInChildren<IngredientBall>();
+
+                for (int i = 0; i < ingredients.Length; i++)
+                {
+                    if (ingredients[i] != null && ingredients[i].Type != IngredientType.None)
+                        return ingredients[i];
+                }
+            }
+
+            IngredientType inferredType = InferIngredientType(other.transform);
+
+            if (inferredType == IngredientType.None && other.attachedRigidbody != null)
+                inferredType = InferIngredientType(other.attachedRigidbody.transform);
+
+            if (inferredType != IngredientType.None)
+            {
+                GameObject ingredientObject = other.attachedRigidbody != null
+                    ? other.attachedRigidbody.gameObject
+                    : other.gameObject;
+
+                IngredientBall ingredient = ingredientObject.GetComponent<IngredientBall>();
+
+                if (ingredient == null)
+                    ingredient = ingredientObject.AddComponent<IngredientBall>();
+
+                ingredient.Configure(inferredType, inferredType.ToString());
+                return ingredient;
+            }
+
             return null;
+        }
+
+        private bool IsCardboxBaseCollider(Collider other)
+        {
+            return other != null && other.GetComponentInParent<CardboxBaseController>() != null;
+        }
+
+        private ParticlePacket GetParticlePacket(Collider other)
+        {
+            ParticlePacket packet = other.GetComponentInParent<ParticlePacket>();
+
+            if (packet != null)
+                return packet;
+
+            packet = other.GetComponentInChildren<ParticlePacket>();
+
+            if (packet != null)
+                return packet;
+
+            if (other.attachedRigidbody != null)
+                return other.attachedRigidbody.GetComponentInChildren<ParticlePacket>();
+
+            return null;
+        }
+
+        private IngredientType InferIngredientType(Transform source)
+        {
+            if (source == null)
+                return IngredientType.None;
+
+            Transform current = source;
+
+            while (current != null)
+            {
+                string objectName = current.name;
+
+                if (objectName.IndexOf("QuarkDown", System.StringComparison.OrdinalIgnoreCase) >= 0
+                    || objectName.IndexOf("Down", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return IngredientType.QuarkDown;
+                }
+
+                if (objectName.IndexOf("QuarkUp", System.StringComparison.OrdinalIgnoreCase) >= 0
+                    || objectName.IndexOf("Up", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return IngredientType.QuarkUp;
+                }
+
+                if (objectName.IndexOf("Electron", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return IngredientType.Electron;
+
+                if (objectName.IndexOf("Proton", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return IngredientType.Proton;
+
+                if (objectName.IndexOf("Neutron", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return IngredientType.Neutron;
+
+                if (objectName.IndexOf("Uranium", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return IngredientType.Uranium;
+
+                current = current.parent;
+            }
+
+            return IngredientType.None;
+        }
+
+        /// <summary>
+        /// Public method to add an ingredient directly by type and amount.
+        /// Called by PaintCanIngredientDetector as a fallback when trigger detection fails.
+        /// </summary>
+        public void AddIngredientDirect(IngredientType type, int amount)
+        {
+            if (!currentCounts.ContainsKey(type))
+                currentCounts[type] = 0;
+
+            currentCounts[type] += amount;
+            Debug.Log($"[BucketAssembler] Direct add: {amount} x {type}. {BuildCurrentContentsText()}");
+
+            UpdateContentsLabel();
+
+            if (requireMixerToolPress)
+            {
+                SetText("Ingredients ajoutes. Appuie sur le recipient avec une PaintCan pour melanger.\n" + BuildCurrentContentsText());
+                return;
+            }
+
+            TryMixCurrentContents();
         }
 
         public void ResetBucket()
         {
             currentCounts.Clear();
-            pendingRecipe = null;
-            timingMiniGameActive = false;
-            timingSuccessCount = 0;
-            cursorPosition = 0f;
-            cursorDirection = 1;
-            xrTimingButtonWasHeld = false;
 
             if (clearSpawnedOutputsOnReset)
                 ClearSpawnedOutputs();
 
             UpdateFeedback();
+            UpdateContentsLabel();
         }
 
         private void ClearSpawnedOutputs()
@@ -686,6 +2254,7 @@ namespace EDNXR.Gameplay
             if (targetRecipe != null)
             {
                 SetText($"Objectif : {targetRecipe.GetRecipeDescription()}\n{BuildCurrentContentsText()}");
+                UpdateContentsLabel();
                 return;
             }
 
@@ -694,8 +2263,41 @@ namespace EDNXR.Gameplay
                 "Proton = 2 Up + 1 Down (uud)\n" +
                 "Neutron = 1 Up + 2 Down (udd)\n" +
                 "Helium = 2 Protons + 2 Neutrons + 2 Electrons\n" +
+                "Uranium = 92 Protons + 146 Neutrons + 92 Electrons\n" +
+                "Melange avec une PaintCan\n" +
                 BuildCurrentContentsText()
             );
+            UpdateContentsLabel();
+        }
+
+        private void BuildContentsLabel()
+        {
+            if (contentsLabel != null)
+                return;
+
+            GameObject labelObject = new GameObject("Bucket Contents Label");
+            labelObject.transform.position = transform.position + contentsLabelOffset;
+            labelObject.transform.localScale = Vector3.one;
+
+            TextMeshPro text = labelObject.AddComponent<TextMeshPro>();
+            text.fontSize = contentsLabelFontSize;
+            text.color = Color.yellow;
+            text.alignment = TextAlignmentOptions.Center;
+            text.fontStyle = FontStyles.Bold;
+            text.rectTransform.sizeDelta = new Vector2(3.5f, 1.1f);
+            contentsLabel = text;
+            UpdateContentsLabel();
+        }
+
+        private void UpdateContentsLabel()
+        {
+            if (contentsLabel == null)
+                return;
+
+            contentsLabel.text =
+                $"Up {GetCount(IngredientType.QuarkUp)}   Down {GetCount(IngredientType.QuarkDown)}\n" +
+                $"p {GetCount(IngredientType.Proton)}   n {GetCount(IngredientType.Neutron)}   e {GetCount(IngredientType.Electron)}\n" +
+                $"U {GetCount(IngredientType.Uranium)}";
         }
 
         private string BuildCurrentContentsText()
@@ -705,7 +2307,8 @@ namespace EDNXR.Gameplay
                 $"Down={GetCount(IngredientType.QuarkDown)}, " +
                 $"p={GetCount(IngredientType.Proton)}, " +
                 $"n={GetCount(IngredientType.Neutron)}, " +
-                $"e={GetCount(IngredientType.Electron)}";
+                $"e={GetCount(IngredientType.Electron)}, " +
+                $"U={GetCount(IngredientType.Uranium)}";
         }
 
         private int GetCount(IngredientType type)

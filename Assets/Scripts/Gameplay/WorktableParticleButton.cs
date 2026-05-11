@@ -8,7 +8,12 @@ namespace EDNXR.Gameplay
     {
         private WorktableParticleSpawner spawner;
         private IngredientType particleType;
+        public IngredientType ParticleType => particleType;
         private ButtonAction action;
+        private Color originalColor;
+        private Renderer buttonRenderer;
+        
+        public bool isUnlocked { get; private set; } = true;
 
         private enum ButtonAction
         {
@@ -18,12 +23,24 @@ namespace EDNXR.Gameplay
             SpawnPacket
         }
 
-        public void ConfigureParticle(WorktableParticleSpawner owner, IngredientType type)
+        public void ConfigureParticle(WorktableParticleSpawner owner, IngredientType type, Color color, bool initialUnlockState)
         {
             spawner = owner;
             particleType = type;
+            originalColor = color;
+            buttonRenderer = GetComponent<Renderer>();
             action = ButtonAction.SelectParticle;
             HookXRSelect();
+            SetUnlocked(initialUnlockState);
+        }
+
+        public void SetUnlocked(bool unlocked)
+        {
+            isUnlocked = unlocked;
+            if (buttonRenderer != null)
+            {
+                buttonRenderer.material.color = unlocked ? originalColor : new Color(0.2f, 0.2f, 0.2f);
+            }
         }
 
         public void ConfigureDecrease(WorktableParticleSpawner owner)
@@ -68,7 +85,7 @@ namespace EDNXR.Gameplay
             Press();
         }
 
-        private void Press()
+        public void Press()
         {
             if (spawner == null)
                 return;
@@ -76,7 +93,8 @@ namespace EDNXR.Gameplay
             switch (action)
             {
                 case ButtonAction.SelectParticle:
-                    spawner.SelectParticle(particleType);
+                    if (isUnlocked)
+                        spawner.SelectParticle(particleType);
                     break;
                 case ButtonAction.DecreaseQuantity:
                     spawner.ChangeQuantity(-1);

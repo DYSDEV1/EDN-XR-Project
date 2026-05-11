@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+using UnityEngine;
+using UnityEngine.XR.Interaction.Toolkit;
 
 namespace EDNXR.Gameplay
 {
@@ -45,9 +46,11 @@ namespace EDNXR.Gameplay
                 return IngredientType.Neutron;
 
             if (objectName.IndexOf("Helium", System.StringComparison.OrdinalIgnoreCase) >= 0
-                || objectName.IndexOf("Helium", System.StringComparison.OrdinalIgnoreCase) >= 0
                 || objectName.IndexOf("Atom", System.StringComparison.OrdinalIgnoreCase) >= 0)
                 return IngredientType.Atom;
+
+            if (objectName.IndexOf("Uranium", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return IngredientType.Uranium;
 
             return ingredientType;
         }
@@ -56,7 +59,43 @@ namespace EDNXR.Gameplay
         {
             if (isConsumed) return;
             isConsumed = true;
-            gameObject.SetActive(false);
+
+            GameObject objectToHide = ResolveObjectToHide();
+            HideObject(objectToHide);
+        }
+
+        private GameObject ResolveObjectToHide()
+        {
+            XRGrabInteractable grabInteractable = GetComponentInParent<XRGrabInteractable>();
+
+            if (grabInteractable != null)
+                return grabInteractable.gameObject;
+
+            ParticlePacket packet = GetComponentInParent<ParticlePacket>();
+
+            if (packet != null)
+                return packet.gameObject;
+
+            Rigidbody rb = GetComponentInParent<Rigidbody>();
+
+            if (rb != null)
+                return rb.gameObject;
+
+            return gameObject;
+        }
+
+        private void HideObject(GameObject objectToHide)
+        {
+            Renderer[] renderers = objectToHide.GetComponentsInChildren<Renderer>(true);
+            Collider[] colliders = objectToHide.GetComponentsInChildren<Collider>(true);
+
+            for (int i = 0; i < renderers.Length; i++)
+                renderers[i].enabled = false;
+
+            for (int i = 0; i < colliders.Length; i++)
+                colliders[i].enabled = false;
+
+            objectToHide.SetActive(false);
         }
 
         public void ResetConsumed()
