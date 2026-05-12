@@ -40,7 +40,10 @@ namespace EDNXR.Gameplay
                 grabInteractable = mixer.AddComponent<XRGrabInteractable>();
 
             grabInteractable.movementType = XRBaseInteractable.MovementType.Kinematic;
+            grabInteractable.snapToColliderVolume = false;
+            grabInteractable.throwOnDetach = false;
             ConfigureGrabColliders(mixer, grabInteractable);
+            IgnorePlayerCollision(mixer);
 
             if (mixer.GetComponent<PcGrabbableObject>() == null)
                 mixer.AddComponent<PcGrabbableObject>();
@@ -139,6 +142,9 @@ namespace EDNXR.Gameplay
             rb.isKinematic = false;
             rb.useGravity = true;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.maxDepenetrationVelocity = 1.5f;
+            rb.maxAngularVelocity = 8f;
         }
 
         private static void EnsurePhysicalCollider(GameObject mixer)
@@ -210,6 +216,53 @@ namespace EDNXR.Gameplay
             }
 
             Debug.Log($"[MixerToolBootstrap] {mixer.name} grab colliders: {grabInteractable.colliders.Count}");
+        }
+
+        private static void IgnorePlayerCollision(GameObject mixer)
+        {
+            Collider[] mixerColliders = mixer.GetComponentsInChildren<Collider>(true);
+            CharacterController[] characterControllers = Object.FindObjectsOfType<CharacterController>(true);
+            int ignoredPairs = 0;
+
+            for (int i = 0; i < mixerColliders.Length; i++)
+            {
+                Collider mixerCollider = mixerColliders[i];
+
+                if (mixerCollider == null || mixerCollider.isTrigger)
+                    continue;
+
+                for (int c = 0; c < characterControllers.Length; c++)
+                {
+                    CharacterController characterController = characterControllers[c];
+
+                    if (characterController == null || !IsPlayerCharacterController(characterController))
+                        continue;
+
+                    Physics.IgnoreCollision(mixerCollider, characterController, true);
+                    ignoredPairs++;
+                }
+            }
+
+            if (ignoredPairs > 0)
+                Debug.Log($"[MixerToolBootstrap] Ignored {ignoredPairs} paintcan/player collision pair(s) for {mixer.name}.");
+        }
+
+        private static bool IsPlayerCharacterController(CharacterController characterController)
+        {
+            Transform current = characterController.transform;
+
+            while (current != null)
+            {
+                if (current.name.IndexOf("XR Origin", System.StringComparison.OrdinalIgnoreCase) >= 0
+                    || current.name.IndexOf("XR Rig", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
         }
 
         private static bool HasPhysicalCollider(GameObject mixer)

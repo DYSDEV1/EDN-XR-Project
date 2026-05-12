@@ -1,7 +1,9 @@
 using System.Collections;
 using TMPro;
+using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.XR;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -19,8 +21,11 @@ namespace EDNXR.Gameplay
         [SerializeField] private float awakeEyeHeight = 1.55f;
         [SerializeField] private float fadeDuration = 2.2f;
         [SerializeField] private float sleepingMusicCutoff = 650f;
+        [SerializeField] private float vrOverlayDistance = 0.9f;
+        [SerializeField] private Vector2 vrOverlaySize = new Vector2(2.6f, 2f);
 
         private Transform xrOrigin;
+        private XROrigin xrRig;
         private Transform couch;
         private Camera mainCamera;
         private Canvas canvas;
@@ -31,10 +36,12 @@ namespace EDNXR.Gameplay
         private PcMouseGrabber pcGrabber;
         private AudioLowPassFilter[] sleepingFilters;
         private bool wakingUp;
+        private bool movementLocked;
 
         private void Start()
         {
             xrOrigin = FindTransformByName(xrOriginName);
+            xrRig = xrOrigin != null ? xrOrigin.GetComponent<XROrigin>() : null;
             mainCamera = Camera.main;
             couch = FindTransformByName(couchName);
 
@@ -45,7 +52,18 @@ namespace EDNXR.Gameplay
             SetupAudio();
             ApplySleepingAudioMuffle();
             MovePlayerToCouch();
+            PlayerMovementLock.Lock("wakeup intro");
+            movementLocked = true;
             SetPcControlsEnabled(false);
+        }
+
+        private void OnDestroy()
+        {
+            if (movementLocked)
+            {
+                PlayerMovementLock.Unlock("wakeup intro destroyed");
+                movementLocked = false;
+            }
         }
 
         private void Update()
@@ -63,9 +81,9 @@ namespace EDNXR.Gameplay
         {
             GameObject canvasObject = new GameObject("Wakeup Intro Canvas");
             canvas = canvasObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 1000;
             canvasObject.AddComponent<CanvasScaler>();
+            ConfigureCanvasForCurrentMode(canvas);
 
             GameObject blackObject = new GameObject("Black Screen");
             blackObject.transform.SetParent(canvasObject.transform, false);
@@ -91,6 +109,24 @@ namespace EDNXR.Gameplay
             textRect.offsetMax = Vector2.zero;
         }
 
+        private void ConfigureCanvasForCurrentMode(Canvas targetCanvas)
+        {
+            if (!IsVrActive() || mainCamera == null)
+            {
+                targetCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                return;
+            }
+
+            targetCanvas.renderMode = RenderMode.WorldSpace;
+            targetCanvas.worldCamera = mainCamera;
+            RectTransform rectTransform = targetCanvas.GetComponent<RectTransform>();
+            rectTransform.SetParent(mainCamera.transform, false);
+            rectTransform.localPosition = new Vector3(0f, 0f, vrOverlayDistance);
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one * 0.001f;
+            rectTransform.sizeDelta = vrOverlaySize * 1000f;
+        }
+
         private void SetupAudio()
         {
             audioSource = gameObject.AddComponent<AudioSource>();
@@ -112,8 +148,8 @@ namespace EDNXR.Gameplay
         {
             Bounds bounds = GetCouchBounds();
             Vector3 position = bounds.center;
-            position.y = bounds.min.y + sleepingEyeHeight - GetCameraLocalHeight();
-            xrOrigin.position = position;
+            position.y = bounds.min.y + sleepingEyeHeight;
+            MoveCameraToWorldPosition(position);
             LookAtCouch(bounds.center);
         }
 
@@ -136,7 +172,7 @@ namespace EDNXR.Gameplay
 
             Bounds bounds = GetCouchBounds();
             Vector3 frontPosition = GetCouchFrontPosition(bounds);
-            xrOrigin.position = frontPosition;
+            MoveCameraToWorldPosition(frontPosition);
             LookAtCouch(bounds.center);
 
             float elapsed = 0f;
@@ -150,6 +186,12 @@ namespace EDNXR.Gameplay
             }
 
             SetPcControlsEnabled(true);
+            wakingUp = false;
+            if (movementLocked)
+            {
+                PlayerMovementLock.Unlock("wakeup intro");
+                movementLocked = false;
+            }
 
             if (canvas != null)
                 Destroy(canvas.gameObject);
@@ -210,25 +252,40 @@ namespace EDNXR.Gameplay
             awayFromCouch.Normalize();
 
             Vector3 position = bounds.center + awayFromCouch * frontDistance;
-            position.y = bounds.min.y + awakeEyeHeight - GetCameraLocalHeight();
+            position.y = bounds.min.y + awakeEyeHeight;
             return position;
         }
 
-        private float GetCameraLocalHeight()
+        private void MoveCameraToWorldPosition(Vector3 cameraWorldPosition)
         {
-            if (mainCamera == null || xrOrigin == null)
-                return 0f;
+            if (xrRig != null)
+            {
+                xrRig.MoveCameraToWorldLocation(cameraWorldPosition);
+                return;
+            }
 
-            return xrOrigin.InverseTransformPoint(mainCamera.transform.position).y;
+            if (mainCamera != null)
+                xrOrigin.position += cameraWorldPosition - mainCamera.transform.position;
+            else
+                xrOrigin.position = cameraWorldPosition;
         }
 
         private void LookAtCouch(Vector3 target)
         {
             Vector3 direction = target - xrOrigin.position;
+
+            if (mainCamera != null)
+                direction = target - mainCamera.transform.position;
+
             direction.y = 0f;
 
             if (direction.sqrMagnitude > 0.001f)
-                xrOrigin.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            {
+                if (xrRig != null)
+                    xrRig.MatchOriginUpCameraForward(Vector3.up, direction.normalized);
+                else
+                    xrOrigin.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            }
         }
 
         private Bounds GetCouchBounds()
@@ -317,11 +374,19 @@ namespace EDNXR.Gameplay
 
         private string BuildPromptText()
         {
+            if (IsVrActive())
+                return "Appuyer sur A ou sur la gachette";
+
 #if ENABLE_INPUT_SYSTEM
             return "Appuyer sur Espace";
 #else
             return "Appuyer sur Espace";
 #endif
+        }
+
+        private bool IsVrActive()
+        {
+            return XRSettings.isDeviceActive;
         }
 
         private Transform FindTransformByName(string objectName)

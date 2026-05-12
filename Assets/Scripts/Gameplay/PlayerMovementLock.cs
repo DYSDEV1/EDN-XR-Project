@@ -63,6 +63,7 @@ namespace EDNXR.Gameplay
 
             return typeName == nameof(PcPlayerController)
                 || typeName.IndexOf("ContinuousMoveProvider", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("ContinuousTurnProvider", System.StringComparison.OrdinalIgnoreCase) >= 0
                 || typeName.IndexOf("SnapTurnProvider", System.StringComparison.OrdinalIgnoreCase) >= 0
                 || typeName.IndexOf("TeleportationProvider", System.StringComparison.OrdinalIgnoreCase) >= 0
                 || typeName.IndexOf("TeleportInteractor", System.StringComparison.OrdinalIgnoreCase) >= 0;
