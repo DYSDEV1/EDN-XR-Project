@@ -7606,6 +7606,99 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 5060444177187149915, guid: 91cea06b48dd5c6468e4e83e00d554df, type: 3}
+--- !u!1001 &621632985
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalScale.x
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalScale.y
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalScale.z
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -2.687
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 1.138
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -9.588
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 0.000000033850103
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0.6500458
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0.00000002895678
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0.759895
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 81.09
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 180
+      objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value:
+      objectReference: {fileID: 2100000, guid: cb5b98c0b03746a4f86092145cf23549, type: 2}
+    - target: {fileID: -1526509560930016547, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value:
+      objectReference: {fileID: 2100000, guid: cb5b98c0b03746a4f86092145cf23549, type: 2}
+    - target: {fileID: 919132149155446097, guid: 9565ccf1f66a4a14fb7b40842d229eb4,
+        type: 3}
+      propertyPath: m_Name
+      value: conair_Alarm
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 9565ccf1f66a4a14fb7b40842d229eb4, type: 3}
 --- !u!1001 &621875976
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -18282,8 +18375,20 @@ MonoBehaviour:
   shakeDirectionThreshold: 0.035
   mixingClipName: melange
   mixingClipVolume: 0.9
+  balancedFollowUpMiniGames: 1
   coolingMiniGameChance: 0.5
   coolingMiniGameDuration: 5
+  timingMiniGameChance: 0
+  timingMiniGameDuration: 4
+  timingMiniGameSteps: 3
+  timingCursorSpeed: 1.4
+  timingGreenZoneSize: 0.22
+  timingSuccessClipName: success
+  timingSuccessClipDuration: 1.4
+  timingSuccessClipVolume: 0.9
+  memoryMiniGameChance: 1
+  memoryRevealDuration: 2
+  memorySolveDuration: 8
   explosionEffectHeight: 0.45
   explosionEffectDuration: 0.75
   explosionEffectRadius: 0.6
@@ -33893,3 +33998,4 @@ SceneRoots:
   - {fileID: 1252501567}
   - {fileID: 209053376}
   - {fileID: 1803793796}
+  - {fileID: 621632985}
