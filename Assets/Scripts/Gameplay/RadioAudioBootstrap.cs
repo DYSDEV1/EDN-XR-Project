@@ -1,9 +1,17 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace EDNXR.Gameplay
 {
     public static class RadioAudioBootstrap
     {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void RegisterSceneLoadedCallback()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureRadioAudio()
         {
@@ -24,6 +32,11 @@ namespace EDNXR.Gameplay
 
             if (clip != null)
                 spatialAudio.SetClip(clip);
+        }
+
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            EnsureRadioAudio();
         }
     }
 }

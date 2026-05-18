@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.XR.Interaction.Toolkit;
 
 namespace EDNXR.Gameplay
@@ -6,7 +7,15 @@ namespace EDNXR.Gameplay
     public static class MixerToolBootstrap
     {
         private const string MixerNamePrefix = "PaintCan";
-        private static readonly Vector3 PhysicalColliderInset = new Vector3(0.025f, 0f, 0.025f);
+        private static readonly Vector3 PhysicalColliderInset = new Vector3(0.045f, 0.015f, 0.045f);
+        private static readonly Vector3 MaxPhysicalColliderSize = new Vector3(0.42f, 0.58f, 0.42f);
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void RegisterSceneLoadedCallback()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureMixerTool()
@@ -26,30 +35,41 @@ namespace EDNXR.Gameplay
             Debug.Log($"[MixerToolBootstrap] Prepared {preparedCount} paintcan(s).");
         }
 
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            EnsureMixerTool();
+        }
+
         private static void PreparePaintCan(GameObject mixer)
         {
             SetDynamicRecursively(mixer);
-            DisableProblemMeshColliders(mixer);
+            ConfigureMeshCollidersForGrab(mixer);
             EnsurePhysicalCollider(mixer);
             EnsureDynamicMixerBody(mixer);
             EnsureTriggerZone(mixer);
             CleanTriggerZones(mixer);
+            RemoveNestedRigidbodies(mixer);
 
             XRGrabInteractable grabInteractable = mixer.GetComponent<XRGrabInteractable>();
             if (grabInteractable == null)
                 grabInteractable = mixer.AddComponent<XRGrabInteractable>();
 
-            grabInteractable.movementType = XRBaseInteractable.MovementType.Kinematic;
+            grabInteractable.movementType = XRBaseInteractable.MovementType.VelocityTracking;
+            grabInteractable.velocityDamping = 0.75f;
+            grabInteractable.velocityScale = 0.85f;
+            grabInteractable.angularVelocityDamping = 0.75f;
+            grabInteractable.angularVelocityScale = 0.75f;
             grabInteractable.snapToColliderVolume = false;
             grabInteractable.throwOnDetach = false;
+            grabInteractable.forceGravityOnDetach = true;
             ConfigureGrabColliders(mixer, grabInteractable);
+            EnsureRecipeInteractor(mixer, grabInteractable);
+            EnsureStabilityGuard(mixer);
             IgnorePlayerCollision(mixer);
 
             if (mixer.GetComponent<PcGrabbableObject>() == null)
                 mixer.AddComponent<PcGrabbableObject>();
 
-            if (mixer.GetComponent<PaintCanRuntimeDebug>() == null)
-                mixer.AddComponent<PaintCanRuntimeDebug>();
         }
 
         private static bool IsPaintCanName(string objectName)
@@ -131,6 +151,16 @@ namespace EDNXR.Gameplay
             }
         }
 
+        private static void EnsureRecipeInteractor(GameObject mixer, XRGrabInteractable grabInteractable)
+        {
+            PaintCanRecipeInteractable recipeInteractable = mixer.GetComponent<PaintCanRecipeInteractable>();
+
+            if (recipeInteractable == null)
+                recipeInteractable = mixer.AddComponent<PaintCanRecipeInteractable>();
+
+            recipeInteractable.Configure(mixer.GetComponentInChildren<BucketAssembler>(true), grabInteractable);
+        }
+
         private static void EnsureDynamicMixerBody(GameObject mixer)
         {
             Rigidbody rb = mixer.GetComponent<Rigidbody>();
@@ -141,10 +171,15 @@ namespace EDNXR.Gameplay
             rb.mass = 0.45f;
             rb.isKinematic = false;
             rb.useGravity = true;
+            rb.detectCollisions = true;
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
-            rb.maxDepenetrationVelocity = 1.5f;
-            rb.maxAngularVelocity = 8f;
+            rb.maxDepenetrationVelocity = 0.8f;
+            rb.maxAngularVelocity = 6f;
+            rb.drag = 0.35f;
+            rb.angularDrag = 1.5f;
         }
 
         private static void EnsurePhysicalCollider(GameObject mixer)
@@ -155,17 +190,16 @@ namespace EDNXR.Gameplay
                 boxCollider = mixer.AddComponent<BoxCollider>();
 
             boxCollider.isTrigger = false;
-            Renderer renderer = mixer.GetComponentInChildren<Renderer>();
+            Bounds localBounds = GetRendererLocalBounds(mixer.transform);
 
-            if (renderer != null)
+            if (localBounds.size.sqrMagnitude > 0.0001f)
             {
-                Bounds localBounds = ToLocalBounds(mixer.transform, renderer.bounds);
                 boxCollider.center = localBounds.center;
-                boxCollider.size = ShrinkSize(localBounds.size, PhysicalColliderInset);
+                boxCollider.size = ClampSize(ShrinkSize(localBounds.size, PhysicalColliderInset), MaxPhysicalColliderSize);
             }
             else
             {
-                boxCollider.size = ShrinkSize(new Vector3(0.25f, 0.35f, 0.25f), PhysicalColliderInset);
+                boxCollider.size = ClampSize(ShrinkSize(new Vector3(0.25f, 0.35f, 0.25f), PhysicalColliderInset), MaxPhysicalColliderSize);
             }
         }
 
@@ -177,22 +211,69 @@ namespace EDNXR.Gameplay
                 Mathf.Max(0.01f, size.z - Mathf.Max(0f, inset.z) * 2f));
         }
 
-        private static void DisableProblemMeshColliders(GameObject mixer)
+        private static Vector3 ClampSize(Vector3 size, Vector3 maxSize)
+        {
+            return new Vector3(
+                Mathf.Clamp(size.x, 0.04f, maxSize.x),
+                Mathf.Clamp(size.y, 0.08f, maxSize.y),
+                Mathf.Clamp(size.z, 0.04f, maxSize.z));
+        }
+
+        private static void RemoveNestedRigidbodies(GameObject mixer)
+        {
+            Rigidbody[] bodies = mixer.GetComponentsInChildren<Rigidbody>(true);
+
+            for (int i = 0; i < bodies.Length; i++)
+            {
+                if (bodies[i] == null || bodies[i].gameObject == mixer)
+                    continue;
+
+                Object.Destroy(bodies[i]);
+            }
+        }
+
+        private static void EnsureStabilityGuard(GameObject mixer)
+        {
+            if (mixer.GetComponent<PaintCanStabilityGuard>() == null)
+                mixer.AddComponent<PaintCanStabilityGuard>();
+        }
+
+        private static void ConfigureMeshCollidersForGrab(GameObject mixer)
         {
             MeshCollider[] meshColliders = mixer.GetComponentsInChildren<MeshCollider>(true);
-            int disabledCount = 0;
+            int configuredCount = 0;
 
             for (int i = 0; i < meshColliders.Length; i++)
             {
-                if (meshColliders[i] == null || meshColliders[i].isTrigger)
+                if (meshColliders[i] == null)
                     continue;
 
-                meshColliders[i].enabled = false;
-                disabledCount++;
+                if (meshColliders[i].GetComponentInParent<BucketAssembler>() != null)
+                    continue;
+
+                meshColliders[i].convex = true;
+                meshColliders[i].isTrigger = true;
+                meshColliders[i].enabled = true;
+                configuredCount++;
             }
 
-            if (disabledCount > 0)
-                Debug.Log($"[MixerToolBootstrap] Disabled {disabledCount} MeshCollider(s) on {mixer.name}; using BoxCollider for physics/grab.");
+            if (configuredCount == 0)
+            {
+                MeshFilter meshFilter = mixer.GetComponentInChildren<MeshFilter>(true);
+
+                if (meshFilter != null && meshFilter.sharedMesh != null)
+                {
+                    MeshCollider meshCollider = meshFilter.gameObject.AddComponent<MeshCollider>();
+                    meshCollider.sharedMesh = meshFilter.sharedMesh;
+                    meshCollider.convex = true;
+                    meshCollider.isTrigger = true;
+                    meshCollider.enabled = true;
+                    configuredCount = 1;
+                }
+            }
+
+            if (configuredCount > 0)
+                Debug.Log($"[MixerToolBootstrap] Configured {configuredCount} MeshCollider(s) on {mixer.name} for XR grab shape.");
         }
 
         private static void ConfigureGrabColliders(GameObject mixer, XRGrabInteractable grabInteractable)
@@ -200,22 +281,32 @@ namespace EDNXR.Gameplay
             grabInteractable.colliders.Clear();
 
             Collider[] colliders = mixer.GetComponentsInChildren<Collider>(true);
+            int meshGrabColliders = 0;
+            int physicalGrabColliders = 0;
 
             for (int i = 0; i < colliders.Length; i++)
             {
-                if (colliders[i] == null || colliders[i].isTrigger)
+                if (colliders[i] == null || !colliders[i].enabled)
                     continue;
 
                 if (colliders[i].GetComponentInParent<BucketAssembler>() != null)
                     continue;
 
                 if (colliders[i] is MeshCollider)
+                {
+                    grabInteractable.colliders.Add(colliders[i]);
+                    meshGrabColliders++;
+                    continue;
+                }
+
+                if (colliders[i].isTrigger)
                     continue;
 
                 grabInteractable.colliders.Add(colliders[i]);
+                physicalGrabColliders++;
             }
 
-            Debug.Log($"[MixerToolBootstrap] {mixer.name} grab colliders: {grabInteractable.colliders.Count}");
+            Debug.Log($"[MixerToolBootstrap] {mixer.name} grab colliders: {grabInteractable.colliders.Count} (mesh={meshGrabColliders}, physical={physicalGrabColliders})");
         }
 
         private static void IgnorePlayerCollision(GameObject mixer)
@@ -228,14 +319,14 @@ namespace EDNXR.Gameplay
             {
                 Collider mixerCollider = mixerColliders[i];
 
-                if (mixerCollider == null || mixerCollider.isTrigger)
+                if (mixerCollider == null)
                     continue;
 
                 for (int c = 0; c < characterControllers.Length; c++)
                 {
                     CharacterController characterController = characterControllers[c];
 
-                    if (characterController == null || !IsPlayerCharacterController(characterController))
+                    if (characterController == null)
                         continue;
 
                     Physics.IgnoreCollision(mixerCollider, characterController, true);
@@ -265,6 +356,34 @@ namespace EDNXR.Gameplay
             return false;
         }
 
+        private static Bounds GetRendererLocalBounds(Transform root)
+        {
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            Bounds combinedBounds = new Bounds(Vector3.zero, Vector3.zero);
+            bool hasBounds = false;
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] == null)
+                    continue;
+
+                Bounds rendererBounds = ToLocalBounds(root, renderers[i].bounds);
+
+                if (!hasBounds)
+                {
+                    combinedBounds = rendererBounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    combinedBounds.Encapsulate(rendererBounds.min);
+                    combinedBounds.Encapsulate(rendererBounds.max);
+                }
+            }
+
+            return hasBounds ? combinedBounds : new Bounds(Vector3.zero, Vector3.zero);
+        }
+
         private static bool HasPhysicalCollider(GameObject mixer)
         {
             Collider[] colliders = mixer.GetComponentsInChildren<Collider>(true);
@@ -280,62 +399,147 @@ namespace EDNXR.Gameplay
 
         private static Bounds ToLocalBounds(Transform root, Bounds worldBounds)
         {
-            Vector3 min = root.InverseTransformPoint(worldBounds.min);
-            Vector3 max = root.InverseTransformPoint(worldBounds.max);
-            return new Bounds((min + max) * 0.5f, Abs(max - min));
+            Vector3 min = worldBounds.min;
+            Vector3 max = worldBounds.max;
+            Bounds localBounds = new Bounds(root.InverseTransformPoint(worldBounds.center), Vector3.zero);
+
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(min.x, min.y, min.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(min.x, min.y, max.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(min.x, max.y, min.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(min.x, max.y, max.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(max.x, min.y, min.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(max.x, min.y, max.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(max.x, max.y, min.z)));
+            localBounds.Encapsulate(root.InverseTransformPoint(new Vector3(max.x, max.y, max.z)));
+            return localBounds;
         }
 
-        private static Vector3 Abs(Vector3 value)
-        {
-            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
-        }
     }
 
     public class PaintCanRuntimeDebug : MonoBehaviour
     {
-        private float nextLogTime;
-        private Vector3 lastPosition;
+    }
 
-        private void Start()
+    public class PaintCanStabilityGuard : MonoBehaviour
+    {
+        private const float LowestSafeY = -0.35f;
+        private const float MaxLinearSpeed = 4.5f;
+        private const float MaxAngularSpeed = 8f;
+        private Rigidbody rb;
+        private XRGrabInteractable grabInteractable;
+        private Vector3 lastSafePosition;
+        private Quaternion lastSafeRotation;
+        private bool pcGrabbed;
+
+        private void Awake()
         {
-            lastPosition = transform.position;
-            LogState("start");
+            rb = GetComponent<Rigidbody>();
+            grabInteractable = GetComponent<XRGrabInteractable>();
+            lastSafePosition = transform.position;
+            lastSafeRotation = transform.rotation;
+            ConfigureBody();
         }
 
-        private void Update()
+        private void LateUpdate()
         {
-            if (Time.time < nextLogTime)
-                return;
+            ConfigureBody();
 
-            nextLogTime = Time.time + 1f;
-            LogState("tick");
-            lastPosition = transform.position;
-        }
-
-        private void LogState(string phase)
-        {
-            Rigidbody rb = GetComponent<Rigidbody>();
-            XRGrabInteractable grab = GetComponent<XRGrabInteractable>();
-            Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
-            Collider[] colliders = GetComponentsInChildren<Collider>(true);
-
-            string firstRendererInfo = "none";
-
-            if (renderers.Length > 0 && renderers[0] != null)
+            if (!IsFinite(transform.position) || transform.position.y < LowestSafeY)
             {
-                Transform rendererTransform = renderers[0].transform;
-                firstRendererInfo =
-                    $"'{renderers[0].name}' pos={rendererTransform.position} local={rendererTransform.localPosition} " +
-                    $"parent='{(rendererTransform.parent != null ? rendererTransform.parent.name : "none")}' static={rendererTransform.gameObject.isStatic}";
+                ResetToLastSafePose();
+                CameraRenderGuard.EnsureCameraIsRenderingNow();
+                return;
             }
 
-            Debug.Log(
-                $"[PaintCanRuntimeDebug] {phase} '{name}' " +
-                $"rootPos={transform.position} movedSinceLast={(transform.position - lastPosition).magnitude:F3} " +
-                $"rb={(rb != null ? $"pos={rb.position}, kinematic={rb.isKinematic}, gravity={rb.useGravity}" : "none")} " +
-                $"grab={(grab != null ? $"yes colliders={grab.colliders.Count}" : "none")} " +
-                $"renderers={renderers.Length} firstRenderer={firstRendererInfo} " +
-                $"colliders={colliders.Length}");
+            if (transform.position.y > 0.05f)
+            {
+                lastSafePosition = transform.position;
+                lastSafeRotation = transform.rotation;
+            }
+        }
+
+        private void OnCollisionEnter(Collision collision)
+        {
+            ClampVelocity();
+        }
+
+        private void OnCollisionStay(Collision collision)
+        {
+            ClampVelocity();
+        }
+
+        private void ConfigureBody()
+        {
+            if (rb == null)
+                rb = GetComponent<Rigidbody>();
+
+            if (rb == null)
+                return;
+
+            rb.detectCollisions = true;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.maxDepenetrationVelocity = 0.8f;
+            rb.maxAngularVelocity = 6f;
+
+            if (IsHeld())
+            {
+                ClampVelocity();
+                return;
+            }
+
+            rb.isKinematic = false;
+            rb.useGravity = true;
+            ClampVelocity();
+        }
+
+        private void ClampVelocity()
+        {
+            if (rb == null)
+                return;
+
+            if (rb.velocity.sqrMagnitude > MaxLinearSpeed * MaxLinearSpeed)
+                rb.velocity = rb.velocity.normalized * MaxLinearSpeed;
+
+            if (rb.angularVelocity.sqrMagnitude > MaxAngularSpeed * MaxAngularSpeed)
+                rb.angularVelocity = rb.angularVelocity.normalized * MaxAngularSpeed;
+        }
+
+        private void ResetToLastSafePose()
+        {
+            transform.SetPositionAndRotation(lastSafePosition, lastSafeRotation);
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+
+            Debug.LogWarning($"[PaintCanStabilityGuard] Reset '{name}' to its last safe pose after an unsafe physics position.");
+        }
+
+        private void OnPcGrabbed()
+        {
+            pcGrabbed = true;
+        }
+
+        private void OnPcReleased()
+        {
+            pcGrabbed = false;
+        }
+
+        private bool IsHeld()
+        {
+            return pcGrabbed || (grabInteractable != null && grabInteractable.isSelected);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
     }
 }

@@ -39,10 +39,17 @@ namespace EDNXR.Gameplay
         [Header("Layout")]
         [SerializeField] private Vector3 panelOffset = new Vector3(-0.39f, 0.3f, -0.39f);
         [SerializeField] private Vector3 panelRotation = new Vector3(90f, 270f, 180f);
-        [SerializeField] private Vector3 iconStartOffset = new Vector3(0.15f, 0f, 0.15f);
-        [SerializeField] private Vector3 iconSpacing = new Vector3(0.16f, 0f, -0.16f);
-        [SerializeField] private Vector3 quantityBarOffset = new Vector3(-0.05f, 0f, 0f);
-        [SerializeField] private float quantityBarLength = 0.45f;
+        [SerializeField] private Vector3 panelTextRotation = new Vector3(-90f, 0f, 0f);
+        [SerializeField] private Vector3 iconStartOffset = new Vector3(0.25f, 0f, 0.18f);
+        [SerializeField] private Vector3 iconSpacing = new Vector3(0.28f, 0f, -0.24f);
+        [SerializeField] private Vector3 iconScale = new Vector3(0.14f, 0.03f, 0.14f);
+        [SerializeField] private Vector3 iconLabelOffset = new Vector3(0f, 0.07f, 0.13f);
+        [SerializeField] private float iconLabelFontSize = 0.14f;
+        [SerializeField] private Vector3 quantityBarOffset = new Vector3(-0.12f, 0f, 0f);
+        [SerializeField] private Vector3 quantityTextOffset = new Vector3(-0.12f, 0.035f, 0.09f);
+        [SerializeField] private float quantityBarLength = 0.38f;
+        [SerializeField] private float titleFontSize = 0.16f;
+        [SerializeField] private float spawnLabelFontSize = 0.11f;
         [SerializeField] private Vector3 screwBoxSpawnOffset = new Vector3(0f, 0.18f, 0f);
 
         [Header("Quantity")]
@@ -78,6 +85,12 @@ namespace EDNXR.Gameplay
                 new ParticleOption(IngredientType.Neutron, "Neutron", new Color(0.72f, 0.72f, 0.72f)),
                 new ParticleOption(IngredientType.Atom, "Helium", new Color(0.58f, 0.25f, 1f)),
             };
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+                Instance = null;
         }
 
         private void Start()
@@ -166,9 +179,9 @@ namespace EDNXR.Gameplay
                 return;
 
             Vector3 localPoint = panelRoot.InverseTransformPoint(worldPoint);
-            float minZ = quantityBarOffset.z - quantityBarLength * 0.5f;
-            float maxZ = quantityBarOffset.z + quantityBarLength * 0.5f;
-            SetQuantityFromNormalized(Mathf.InverseLerp(minZ, maxZ, localPoint.z));
+            float minX = quantityBarOffset.x - quantityBarLength * 0.5f;
+            float maxX = quantityBarOffset.x + quantityBarLength * 0.5f;
+            SetQuantityFromNormalized(Mathf.InverseLerp(minX, maxX, localPoint.x));
         }
 
         public float GetQuantityNormalized()
@@ -289,8 +302,9 @@ namespace EDNXR.Gameplay
             panelRoot.position = parent.position + panelOffset;
             panelRoot.rotation = Quaternion.Euler(panelRotation);
 
-            titleText = CreateText("SelectedText", panelRoot, new Vector3(0f, 0.02f, -0.36f), 0.13f);
-            quantityText = CreateText("QuantityText", panelRoot, new Vector3(0f, 0.02f, 0.24f), 0.11f);
+            titleText = CreateText("SelectedText", panelRoot, new Vector3(0f, 0.02f, -0.39f), titleFontSize);
+            quantityText = CreateText("QuantityText", panelRoot, quantityTextOffset, 0.2f);
+            quantityText.fontStyle = FontStyles.Bold;
 
             int columns = 2;
             for (int i = 0; i < particleOptions.Length; i++)
@@ -299,7 +313,7 @@ namespace EDNXR.Gameplay
                 int col = i % columns;
                 Vector3 localPosition = iconStartOffset + new Vector3(iconSpacing.x * col, 0f, iconSpacing.z * row);
                 
-                GameObject icon = CreateButtonPrimitive(particleOptions[i].label, particleOptions[i].color, localPosition, new Vector3(0.1f, 0.025f, 0.1f));
+                GameObject icon = CreateButtonPrimitive(particleOptions[i].label, particleOptions[i].color, localPosition, iconScale);
                 icon.transform.SetParent(panelRoot, false);
                 
                 WorktableParticleButton buttonScript = icon.AddComponent<WorktableParticleButton>();
@@ -307,15 +321,26 @@ namespace EDNXR.Gameplay
                 buttonScript.ConfigureParticle(this, particleOptions[i].type, particleOptions[i].color, isInitiallyUnlocked);
                 particleButtons.Add(buttonScript);
                 
-                CreateText(particleOptions[i].label + "Label", icon.transform, new Vector3(0f, 0.04f, 0.075f), 0.055f, particleOptions[i].label);
+                TMP_Text labelText = CreateText(particleOptions[i].label + "Label", panelRoot, localPosition + iconLabelOffset, iconLabelFontSize, particleOptions[i].label);
+                labelText.fontStyle = FontStyles.Bold;
+                labelText.enableWordWrapping = false;
+                labelText.outlineColor = Color.white;
+                labelText.outlineWidth = 0.12f;
+                labelText.rectTransform.sizeDelta = new Vector2(1.2f, 0.38f);
             }
 
             BuildQuantityBar();
 
-            GameObject spawn = CreateButtonPrimitive("Spawn Packet", new Color(1f, 0.85f, 0.2f), new Vector3(-0.25f, 0f, 0.15f), new Vector3(0.18f, 0.035f, 0.12f));
+            Vector3 spawnPosition = new Vector3(-0.25f, 0f, 0.15f);
+            GameObject spawn = CreateButtonPrimitive("Spawn Packet", new Color(1f, 0.85f, 0.2f), spawnPosition, new Vector3(0.18f, 0.035f, 0.12f));
             spawn.transform.SetParent(panelRoot, false);
             spawn.AddComponent<WorktableParticleButton>().ConfigureSpawn(this);
-            CreateText("SpawnLabel", spawn.transform, new Vector3(0f, 0.045f, 0f), 0.055f, "SPAWN");
+            TMP_Text spawnText = CreateText("SpawnLabel", panelRoot, spawnPosition + new Vector3(0f, 0.055f, 0.105f), spawnLabelFontSize, "SPAWN");
+            spawnText.fontStyle = FontStyles.Bold;
+            spawnText.enableWordWrapping = false;
+            spawnText.outlineColor = Color.white;
+            spawnText.outlineWidth = 0.12f;
+            spawnText.rectTransform.sizeDelta = new Vector2(1f, 0.32f);
 
             Debug.Log($"[WorktableParticleSpawner] Built panel under {(parent != null ? parent.name : "null")}. Particle buttons={particleButtons.Count}");
         }
@@ -374,7 +399,7 @@ namespace EDNXR.Gameplay
                 "Quantity Scroll Bar",
                 new Color(0.18f, 0.18f, 0.18f),
                 quantityBarOffset,
-                new Vector3(0.045f, 0.025f, quantityBarLength));
+                new Vector3(quantityBarLength, 0.025f, 0.045f));
             track.transform.SetParent(panelRoot, false);
             track.AddComponent<WorktableQuantitySlider>().Configure(this);
             quantityTrackRenderer = track.GetComponent<Renderer>();
@@ -383,7 +408,7 @@ namespace EDNXR.Gameplay
                 "Quantity Scroll Handle",
                 Color.white,
                 quantityBarOffset,
-                new Vector3(0.065f, 0.045f, 0.06f));
+                new Vector3(0.06f, 0.045f, 0.085f));
             handle.transform.SetParent(panelRoot, false);
             handle.AddComponent<WorktableQuantitySlider>().Configure(this);
             quantityHandle = handle.transform;
@@ -413,7 +438,7 @@ namespace EDNXR.Gameplay
             GameObject textObject = new GameObject(objectName);
             textObject.transform.SetParent(parent, false);
             textObject.transform.localPosition = localPosition;
-            textObject.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            textObject.transform.localRotation = Quaternion.Euler(panelTextRotation);
 
             TextMeshPro tmp = textObject.AddComponent<TextMeshPro>();
             tmp.text = text;
@@ -432,16 +457,17 @@ namespace EDNXR.Gameplay
                 titleText.text = "Particle: " + option.label;
 
             if (quantityText != null)
-                quantityText.text = "Quantity: " + selectedQuantity;
+                quantityText.text = $"x{selectedQuantity}";
 
             if (quantityHandle != null)
             {
                 float normalized = GetQuantityNormalized();
-                float minZ = quantityBarOffset.z - quantityBarLength * 0.5f;
-                float maxZ = quantityBarOffset.z + quantityBarLength * 0.5f;
+                float minX = quantityBarOffset.x - quantityBarLength * 0.5f;
+                float maxX = quantityBarOffset.x + quantityBarLength * 0.5f;
                 
                 Vector3 handlePos = quantityHandle.localPosition;
-                handlePos.z = Mathf.Lerp(minZ, maxZ, normalized);
+                handlePos.x = Mathf.Lerp(minX, maxX, normalized);
+                handlePos.z = quantityBarOffset.z;
                 quantityHandle.localPosition = handlePos;
             }
 

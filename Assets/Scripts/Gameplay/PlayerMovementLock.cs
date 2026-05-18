@@ -39,6 +39,19 @@ namespace EDNXR.Gameplay
             Debug.Log($"[PlayerMovementLock] Unlocked player movement. reason={reason}");
         }
 
+        public static void ForceUnlockAll(string reason)
+        {
+            foreach (var pair in savedStates)
+            {
+                if (pair.Key != null)
+                    pair.Key.enabled = pair.Value;
+            }
+
+            savedStates.Clear();
+            lockCount = 0;
+            Debug.Log($"[PlayerMovementLock] Force unlocked player movement. reason={reason}");
+        }
+
         private static void SetMovementEnabled(bool enabled)
         {
             Behaviour[] behaviours = Object.FindObjectsOfType<Behaviour>(true);

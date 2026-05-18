@@ -97,9 +97,10 @@ namespace EDNXR.Gameplay
         [SerializeField] private float shakeDirectionThreshold = 0.035f;
         [SerializeField] private string mixingClipName = "melange";
         [SerializeField] private float mixingClipVolume = 0.9f;
-        [SerializeField, Range(0f, 1f)] private float coolingMiniGameChance = 0f;
+        [SerializeField] private bool balancedFollowUpMiniGames = true;
+        [SerializeField, Range(0f, 1f)] private float coolingMiniGameChance = 1f;
         [SerializeField] private float coolingMiniGameDuration = 5f;
-        [SerializeField, Range(0f, 1f)] private float timingMiniGameChance = 0f;
+        [SerializeField, Range(0f, 1f)] private float timingMiniGameChance = 1f;
         [SerializeField] private float timingMiniGameDuration = 4f;
         [SerializeField] private int timingMiniGameSteps = 3;
         [SerializeField] private float timingCursorSpeed = 1.4f;
@@ -131,6 +132,7 @@ namespace EDNXR.Gameplay
         private readonly List<GameObject> spawnedOutputs = new();
         private readonly HashSet<GameObject> protectedRecipeOutputs = new();
         private static readonly HashSet<IngredientType> completedRecipeOutputs = new();
+        private static readonly List<FollowUpMiniGame> balancedFollowUpMiniGameBag = new List<FollowUpMiniGame>();
         private CraftRecipe[] builtInRecipes;
         private int workbenchSpawnIndex = 0;
         private AudioClip generatedExplosionClip;
@@ -143,9 +145,10 @@ namespace EDNXR.Gameplay
         private Transform originalCameraParent;
         private Vector3 originalCameraLocalPos;
         private Quaternion originalCameraLocalRot;
+        private bool deathMovedCamera;
+        private bool deathMovementLocked;
+        private float deathInputEnabledTime;
         private bool isPaintCanTriggerZone = false;
-        private float nextTriggerDebugLogTime = 0f;
-        private Vector3 lastTriggerDebugPosition;
         private bool isRecipeMiniGameActive = false;
         private Coroutine recipeMiniGameRoutine;
         private AudioSource mixingAudioSource;
@@ -169,6 +172,12 @@ namespace EDNXR.Gameplay
             Cooling,
             Timing,
             Memory
+        }
+
+        public static void ResetCompletedRecipes()
+        {
+            completedRecipeOutputs.Clear();
+            balancedFollowUpMiniGameBag.Clear();
         }
 
         private void Awake()
@@ -265,6 +274,12 @@ namespace EDNXR.Gameplay
         {
             StopMixingSound();
             DestroyContentsLabel();
+
+            if (deathMovementLocked)
+            {
+                PlayerMovementLock.Unlock("recipe death destroyed");
+                deathMovementLocked = false;
+            }
         }
 
         /// <summary>
@@ -350,7 +365,6 @@ namespace EDNXR.Gameplay
                 parentRb.useGravity = false;
             }
 
-            lastTriggerDebugPosition = transform.position;
             Debug.Log($"[BucketAssembler] Trigger setup complete. name='{name}', parent='{(transform.parent != null ? transform.parent.name : "none")}', isPaintCanTriggerZone={isPaintCanTriggerZone}, position={transform.position}, localPosition={transform.localPosition}, colliders={GetComponents<Collider>().Length}, hasRigidbody={GetComponent<Rigidbody>() != null}");
         }
 
@@ -409,11 +423,13 @@ namespace EDNXR.Gameplay
 
         private void Update()
         {
-            DebugPaintCanTriggerZone();
-
             if (isDead)
             {
                 bool pressed = false;
+
+                if (Time.time < deathInputEnabledTime)
+                    return;
+
 #if ENABLE_INPUT_SYSTEM
                 if (Keyboard.current != null && Keyboard.current.anyKey.wasPressedThisFrame)
                     pressed = true;
@@ -423,6 +439,9 @@ namespace EDNXR.Gameplay
                 if (Input.anyKeyDown)
                     pressed = true;
 #endif
+                if (DeathRestartPressedInXR())
+                    pressed = true;
+
                 if (pressed)
                 {
                     if (deathTextUI != null)
@@ -436,31 +455,6 @@ namespace EDNXR.Gameplay
                 return;
 
             ScanForIngredientsNearBucket();
-        }
-
-        private void DebugPaintCanTriggerZone()
-        {
-            if (!isPaintCanTriggerZone || Time.time < nextTriggerDebugLogTime)
-                return;
-
-            nextTriggerDebugLogTime = Time.time + 1f;
-
-            Rigidbody ownRb = GetComponent<Rigidbody>();
-            Rigidbody parentRb = transform.parent != null ? transform.parent.GetComponent<Rigidbody>() : null;
-            XRGrabInteractable parentGrab = transform.parent != null ? transform.parent.GetComponent<XRGrabInteractable>() : null;
-            Collider[] ownColliders = GetComponents<Collider>();
-            float fallDistance = lastTriggerDebugPosition.y - transform.position.y;
-            lastTriggerDebugPosition = transform.position;
-
-            Debug.Log(
-                "[BucketAssembler] PaintCan TriggerZone debug | " +
-                $"trigger='{name}' pos={transform.position} local={transform.localPosition} " +
-                $"fallSinceLast={fallDistance:F3} hasOwnRb={ownRb != null} " +
-                $"parent='{(transform.parent != null ? transform.parent.name : "none")}' " +
-                $"parentPos={(transform.parent != null ? transform.parent.position.ToString() : "none")} " +
-                $"parentRb={(parentRb != null ? $"kinematic={parentRb.isKinematic}, gravity={parentRb.useGravity}" : "none")} " +
-                $"parentGrab={(parentGrab != null ? $"yes, colliders={parentGrab.colliders.Count}" : "none")} " +
-                $"ownColliders={ownColliders.Length} label={(contentsLabel != null ? contentsLabel.transform.position.ToString() : "none")}");
         }
 
         private void ScanForIngredientsNearBucket()
@@ -532,6 +526,8 @@ namespace EDNXR.Gameplay
         private void OnTriggerEnter(Collider other)
         {
             if (Time.time < startupGraceEndTime) return;
+            if (ShouldIgnorePassiveEnvironment(other)) return;
+
             Debug.Log($"[BucketAssembler] OnTriggerEnter: {other.name} (root: {other.transform.root.name})");
             ProcessTriggerCollider(other);
         }
@@ -539,6 +535,8 @@ namespace EDNXR.Gameplay
         private void OnCollisionEnter(Collision collision)
         {
             if (Time.time < startupGraceEndTime) return;
+            if (collision == null || ShouldIgnorePassiveEnvironment(collision.collider)) return;
+
             Debug.Log($"[BucketAssembler] OnCollisionEnter: {collision.collider.name} (root: {collision.transform.root.name})");
             ProcessIngredientCollider(collision.collider);
         }
@@ -546,8 +544,31 @@ namespace EDNXR.Gameplay
         private void OnTriggerStay(Collider other)
         {
             if (Time.time < startupGraceEndTime) return;
+            if (ShouldIgnorePassiveEnvironment(other)) return;
 
             ProcessIngredientCollider(other);
+        }
+
+        private bool ShouldIgnorePassiveEnvironment(Collider other)
+        {
+            if (other == null)
+                return true;
+
+            if (other.attachedRigidbody != null)
+                return false;
+
+            if (IsMixerTool(other) || IsCardboxBaseCollider(other))
+                return false;
+
+            if (other.GetComponentInParent<IngredientBall>() != null
+                || other.GetComponentInChildren<IngredientBall>() != null
+                || other.GetComponentInParent<ParticlePacket>() != null
+                || other.GetComponentInChildren<ParticlePacket>() != null)
+            {
+                return false;
+            }
+
+            return InferIngredientType(other.transform) == IngredientType.None;
         }
 
         private void ProcessTriggerCollider(Collider other)
@@ -557,7 +578,11 @@ namespace EDNXR.Gameplay
 
             if (IsMixerTool(other))
             {
-                TryMixCurrentContents();
+                if (!requireMixerToolPress)
+                    TryMixCurrentContents();
+                else if (currentCounts.Count > 0)
+                    SetText("Ingredients ajoutes. Appuie sur la PaintCan pour melanger.\n" + BuildCurrentContentsText());
+
                 return;
             }
 
@@ -774,6 +799,9 @@ namespace EDNXR.Gameplay
 
         private FollowUpMiniGame ChooseFollowUpMiniGame()
         {
+            if (balancedFollowUpMiniGames)
+                return DrawBalancedFollowUpMiniGame();
+
             float timingChance = Mathf.Clamp01(timingMiniGameChance);
             float coolingChance = Mathf.Clamp01(coolingMiniGameChance);
             float memoryChance = Mathf.Clamp01(memoryMiniGameChance);
@@ -791,6 +819,33 @@ namespace EDNXR.Gameplay
                 return FollowUpMiniGame.Cooling;
 
             return FollowUpMiniGame.Memory;
+        }
+
+        private FollowUpMiniGame DrawBalancedFollowUpMiniGame()
+        {
+            if (balancedFollowUpMiniGameBag.Count == 0)
+                RefillBalancedFollowUpMiniGameBag();
+
+            int lastIndex = balancedFollowUpMiniGameBag.Count - 1;
+            FollowUpMiniGame selected = balancedFollowUpMiniGameBag[lastIndex];
+            balancedFollowUpMiniGameBag.RemoveAt(lastIndex);
+            return selected;
+        }
+
+        private static void RefillBalancedFollowUpMiniGameBag()
+        {
+            balancedFollowUpMiniGameBag.Clear();
+            balancedFollowUpMiniGameBag.Add(FollowUpMiniGame.Cooling);
+            balancedFollowUpMiniGameBag.Add(FollowUpMiniGame.Timing);
+            balancedFollowUpMiniGameBag.Add(FollowUpMiniGame.Memory);
+
+            for (int i = balancedFollowUpMiniGameBag.Count - 1; i > 0; i--)
+            {
+                int swapIndex = Random.Range(0, i + 1);
+                FollowUpMiniGame temp = balancedFollowUpMiniGameBag[i];
+                balancedFollowUpMiniGameBag[i] = balancedFollowUpMiniGameBag[swapIndex];
+                balancedFollowUpMiniGameBag[swapIndex] = temp;
+            }
         }
 
         private IEnumerator CoolingMiniGameRoutine(Transform paintCan, System.Action<bool> onCompleted)
@@ -1473,14 +1528,23 @@ namespace EDNXR.Gameplay
             onWrongRecipe?.Invoke();
             
             isDead = true;
+            deathInputEnabledTime = Time.time + 0.5f;
 
-            // Detach and move camera to third person
             Camera mainCam = Camera.main;
-            if (mainCam != null)
+            if (IsVrActive())
+            {
+                if (!deathMovementLocked)
+                {
+                    PlayerMovementLock.Lock("recipe death");
+                    deathMovementLocked = true;
+                }
+            }
+            else if (mainCam != null)
             {
                 originalCameraParent = mainCam.transform.parent;
                 originalCameraLocalPos = mainCam.transform.localPosition;
                 originalCameraLocalRot = mainCam.transform.localRotation;
+                deathMovedCamera = true;
 
                 mainCam.transform.SetParent(null);
                 mainCam.transform.position = transform.position + new Vector3(0f, 2.5f, -3f);
@@ -1501,7 +1565,8 @@ namespace EDNXR.Gameplay
         {
             GameObject canvasObj = new GameObject("DeathCanvas");
             Canvas canvas = canvasObj.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 2000;
+            ConfigureDeathCanvas(canvas);
             canvasObj.AddComponent<CanvasScaler>();
             canvasObj.AddComponent<GraphicRaycaster>();
 
@@ -1513,13 +1578,17 @@ namespace EDNXR.Gameplay
             bgRect.anchorMin = Vector2.zero;
             bgRect.anchorMax = Vector2.one;
             bgRect.sizeDelta = Vector2.zero;
+            bgRect.offsetMin = Vector2.zero;
+            bgRect.offsetMax = Vector2.zero;
 
             GameObject textObj = new GameObject("DeathText");
             textObj.transform.SetParent(canvasObj.transform, false);
             deathTextUI = textObj.AddComponent<Text>();
-            deathTextUI.text = "VOUS ÊTES MORT\nAppuyez sur une touche pour réapparaître";
-            deathTextUI.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            deathTextUI.fontSize = 48;
+            deathTextUI.text = IsVrActive()
+                ? "VOUS ETES MORT\nAppuyez sur A ou sur la gachette pour reapparaitre"
+                : "VOUS ETES MORT\nAppuyez sur une touche pour reapparaitre";
+            deathTextUI.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            deathTextUI.fontSize = IsVrActive() ? 64 : 48;
             deathTextUI.alignment = TextAnchor.MiddleCenter;
             deathTextUI.color = Color.white;
             deathTextUI.gameObject.AddComponent<Outline>().effectColor = Color.black;
@@ -1530,6 +1599,27 @@ namespace EDNXR.Gameplay
             textRect.sizeDelta = Vector2.zero;
         }
 
+        private void ConfigureDeathCanvas(Canvas canvas)
+        {
+            Camera mainCam = Camera.main;
+
+            if (!IsVrActive() || mainCam == null)
+            {
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                return;
+            }
+
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = mainCam;
+
+            RectTransform rectTransform = canvas.GetComponent<RectTransform>();
+            rectTransform.SetParent(mainCam.transform, false);
+            rectTransform.localPosition = new Vector3(0f, 0f, 1.05f);
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one * 0.001f;
+            rectTransform.sizeDelta = new Vector2(2600f, 1700f);
+        }
+
         private void RestartScene()
         {
             if (deathTextUI != null && deathTextUI.canvas != null)
@@ -1538,11 +1628,12 @@ namespace EDNXR.Gameplay
             }
 
             Camera mainCam = Camera.main;
-            if (mainCam != null)
+            if (mainCam != null && deathMovedCamera)
             {
                 mainCam.transform.SetParent(originalCameraParent, false);
                 mainCam.transform.localPosition = originalCameraLocalPos;
                 mainCam.transform.localRotation = originalCameraLocalRot;
+                deathMovedCamera = false;
             }
 
             PcPlayerController controller = FindObjectOfType<PcPlayerController>(true);
@@ -1558,9 +1649,51 @@ namespace EDNXR.Gameplay
             foreach (var packet in packets) Destroy(packet.gameObject);
 
             GameObject wakeupHost = new GameObject("Wakeup Intro Controller");
-            wakeupHost.AddComponent<WakeupIntroController>();
+            WakeupIntroController wakeupIntro = wakeupHost.AddComponent<WakeupIntroController>();
+            bool wakeupStarted = wakeupIntro.BeginIntro();
+
+            if (!wakeupStarted)
+                Destroy(wakeupHost);
+
+            if (deathMovementLocked)
+            {
+                PlayerMovementLock.Unlock("recipe death");
+                deathMovementLocked = false;
+            }
 
             isDead = false;
+        }
+
+        private bool DeathRestartPressedInXR()
+        {
+            if (!IsVrActive())
+                return false;
+
+            return XRButtonPressed(UnityEngine.XR.XRNode.LeftHand)
+                || XRButtonPressed(UnityEngine.XR.XRNode.RightHand);
+        }
+
+        private bool XRButtonPressed(UnityEngine.XR.XRNode node)
+        {
+            UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+
+            if (!device.isValid)
+                return false;
+
+            bool pressed;
+
+            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out pressed) && pressed)
+                return true;
+
+            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out pressed) && pressed)
+                return true;
+
+            return false;
+        }
+
+        private bool IsVrActive()
+        {
+            return UnityEngine.XR.XRSettings.isDeviceActive;
         }
 
         private bool IsMixerTool(Collider other)
@@ -1600,6 +1733,7 @@ namespace EDNXR.Gameplay
             effectObject.transform.position = position;
 
             ParticleSystem particles = effectObject.AddComponent<ParticleSystem>();
+            particles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             ParticleSystemRenderer psRenderer = effectObject.GetComponent<ParticleSystemRenderer>();
             Shader particleShader = Shader.Find("Legacy Shaders/Particles/Additive");
             if (particleShader == null) particleShader = Shader.Find("Particles/Standard Unlit");
@@ -1611,6 +1745,7 @@ namespace EDNXR.Gameplay
                 psRenderer.material = particleMat;
             }
             ParticleSystem.MainModule main = particles.main;
+            main.playOnAwake = false;
             main.duration = explosionEffectDuration;
             main.loop = false;
             main.startLifetime = new ParticleSystem.MinMaxCurve(0.8f, 1.5f);
@@ -1639,6 +1774,7 @@ namespace EDNXR.Gameplay
             else
                 AudioSource.PlayClipAtPoint(GetExplosionClip(), position, explosionVolume);
 
+            particles.Play();
             Destroy(effectObject, explosionEffectDuration + 2f);
             StartCoroutine(FadeExplosionLight(flash));
         }
@@ -1778,17 +1914,15 @@ namespace EDNXR.Gameplay
 
         private GameObject CreateParticleBall(string particleName, IngredientType type, Color color, float radius, Vector3 position)
         {
-            // Uranium must be a clear grabbable ball spawned on the PaintCan.
-            // The FBX resource has a visual offset in some imports, which can leave only the label visible.
-            GameObject uraniumModel = null;
+            GameObject uraniumModel = type == IngredientType.Uranium ? LoadUraniumModel() : null;
 
             GameObject ball = uraniumModel != null
-                ? Instantiate(uraniumModel)
+                ? CreateUraniumModelRoot(uraniumModel, radius)
                 : GameObject.CreatePrimitive(PrimitiveType.Sphere);
 
             ball.name = particleName;
             ball.transform.position = position;
-            ball.transform.localScale = uraniumModel != null ? Vector3.one * 0.25f : Vector3.one * (radius * 2f);
+            ball.transform.localScale = uraniumModel != null ? Vector3.one : Vector3.one * (radius * 2f);
 
             if (uraniumModel == null)
             {
@@ -1805,6 +1939,10 @@ namespace EDNXR.Gameplay
                     }
                     renderer.material = material;
                 }
+            }
+            else
+            {
+                ApplyUraniumGreenMaterial(ball);
             }
 
             EnsureCollider(ball);
@@ -1851,12 +1989,28 @@ namespace EDNXR.Gameplay
 
         private GameObject LoadUraniumModel()
         {
-            GameObject model = Resources.Load<GameObject>("UraniumModel");
+            GameObject model = LoadResourceModel("uranium");
 
             if (model != null)
                 return model;
 
-            Object[] loadedAssets = Resources.LoadAll("UraniumModel");
+            model = LoadResourceModel("UraniumModel");
+
+            if (model != null)
+                return model;
+
+            Debug.LogWarning("[BucketAssembler] Uranium model not found. Expected Assets/Resources/uranium.obj");
+            return null;
+        }
+
+        private GameObject LoadResourceModel(string resourceName)
+        {
+            GameObject model = Resources.Load<GameObject>(resourceName);
+
+            if (model != null)
+                return model;
+
+            Object[] loadedAssets = Resources.LoadAll(resourceName);
 
             for (int i = 0; i < loadedAssets.Length; i++)
             {
@@ -1864,8 +2018,88 @@ namespace EDNXR.Gameplay
                     return loadedModel;
             }
 
-            Debug.LogWarning("[BucketAssembler] UraniumModel not found in Resources. Expected Assets/Resources/UraniumModel.fbx");
             return null;
+        }
+
+        private GameObject CreateUraniumModelRoot(GameObject uraniumModel, float radius)
+        {
+            GameObject root = new GameObject("Uranium Model Root");
+            GameObject visual = Instantiate(uraniumModel, root.transform);
+            visual.name = "Uranium Visual";
+            visual.transform.localPosition = Vector3.zero;
+            visual.transform.localRotation = Quaternion.identity;
+            visual.transform.localScale = Vector3.one * 0.25f;
+            CenterVisualOnRoot(root.transform, visual.transform);
+
+            float targetDiameter = Mathf.Max(radius * 2f, 0.35f);
+            FitVisualToDiameter(visual.transform, targetDiameter);
+            CenterVisualOnRoot(root.transform, visual.transform);
+            return root;
+        }
+
+        private void ApplyUraniumGreenMaterial(GameObject target)
+        {
+            Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+            Material uraniumMaterial = new Material(Shader.Find("Standard"));
+            uraniumMaterial.color = new Color(0.1f, 0.9f, 0.18f);
+            uraniumMaterial.SetColor("_EmissionColor", new Color(0.02f, 0.2f, 0.03f));
+            uraniumMaterial.EnableKeyword("_EMISSION");
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    renderers[i].material = uraniumMaterial;
+            }
+        }
+
+        private void CenterVisualOnRoot(Transform root, Transform visual)
+        {
+            Bounds bounds;
+
+            if (!TryGetRendererBounds(visual, out bounds))
+                return;
+
+            visual.position += root.position - bounds.center;
+        }
+
+        private void FitVisualToDiameter(Transform visual, float targetDiameter)
+        {
+            Bounds bounds;
+
+            if (!TryGetRendererBounds(visual, out bounds))
+                return;
+
+            float largestSize = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
+
+            if (largestSize <= 0.0001f)
+                return;
+
+            visual.localScale *= targetDiameter / largestSize;
+        }
+
+        private bool TryGetRendererBounds(Transform root, out Bounds bounds)
+        {
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            bounds = new Bounds(root.position, Vector3.zero);
+            bool hasBounds = false;
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] == null)
+                    continue;
+
+                if (!hasBounds)
+                {
+                    bounds = renderers[i].bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(renderers[i].bounds);
+                }
+            }
+
+            return hasBounds;
         }
 
         private void EnsureCollider(GameObject target)

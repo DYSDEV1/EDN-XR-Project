@@ -233,6 +233,19 @@ namespace EDNXR.Gameplay
                 return true;
             }
 
+            SessionResetButton resetButton = hit.collider.GetComponentInParent<SessionResetButton>();
+            if (resetButton != null)
+            {
+                resetButton.ResetSession();
+                return true;
+            }
+
+            PaintCanRecipeInteractable paintCan = hit.collider.GetComponentInParent<PaintCanRecipeInteractable>();
+            if (paintCan != null && paintCan.TryMixFromInteraction())
+            {
+                return true;
+            }
+
             BucketAssembler bucket = hit.collider.GetComponentInParent<BucketAssembler>();
             if (bucket != null)
             {
@@ -268,7 +281,14 @@ namespace EDNXR.Gameplay
                 return true;
             }
 
-            Debug.Log("[PcMouseGrabber] E interact hit has no BucketAssembler, LightSwitchController, PhoneObjectiveController, DoorObjectiveController, or GlovesObjectiveController in parents.");
+            ReturnToSleepObjectiveInteractable sleep = hit.collider.GetComponentInParent<ReturnToSleepObjectiveInteractable>();
+            if (sleep != null)
+            {
+                sleep.TrySleep();
+                return true;
+            }
+
+            Debug.Log("[PcMouseGrabber] E interact hit has no BucketAssembler, LightSwitchController, PhoneObjectiveController, DoorObjectiveController, GlovesObjectiveController, or ReturnToSleepObjectiveInteractable in parents.");
             return false;
         }
 

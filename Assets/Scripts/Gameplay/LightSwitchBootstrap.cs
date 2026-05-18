@@ -1,10 +1,18 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace EDNXR.Gameplay
 {
     public static class LightSwitchBootstrap
     {
         private const string PreferredLightSwitchName = "LightSwitch 1 (1)";
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void RegisterSceneLoadedCallback()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureLightSwitch()
@@ -23,6 +31,11 @@ namespace EDNXR.Gameplay
                 lightSwitch.AddComponent<LightSwitchController>();
 
             Debug.Log($"[LightSwitchBootstrap] Interrupteur prepare: {lightSwitch.name}");
+        }
+
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            EnsureLightSwitch();
         }
 
         private static GameObject FindLightSwitch()

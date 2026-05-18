@@ -35,18 +35,29 @@ namespace EDNXR.Gameplay
         private PcPlayerController pcController;
         private PcMouseGrabber pcGrabber;
         private AudioLowPassFilter[] sleepingFilters;
+        private bool introStarted;
         private bool wakingUp;
         private bool movementLocked;
 
         private void Start()
         {
+            BeginIntro();
+        }
+
+        public bool BeginIntro()
+        {
+            if (introStarted)
+                return true;
+
             xrOrigin = FindTransformByName(xrOriginName);
             xrRig = xrOrigin != null ? xrOrigin.GetComponent<XROrigin>() : null;
             mainCamera = Camera.main;
             couch = FindTransformByName(couchName);
 
             if (xrOrigin == null || couch == null)
-                return;
+                return false;
+
+            introStarted = true;
 
             BuildOverlay();
             SetupAudio();
@@ -55,6 +66,7 @@ namespace EDNXR.Gameplay
             PlayerMovementLock.Lock("wakeup intro");
             movementLocked = true;
             SetPcControlsEnabled(false);
+            return true;
         }
 
         private void OnDestroy()
@@ -193,6 +205,8 @@ namespace EDNXR.Gameplay
                 movementLocked = false;
             }
 
+            LevelTimerController.NotifyLevelStarted();
+
             if (canvas != null)
                 Destroy(canvas.gameObject);
 
@@ -258,16 +272,29 @@ namespace EDNXR.Gameplay
 
         private void MoveCameraToWorldPosition(Vector3 cameraWorldPosition)
         {
+            CharacterController characterController = xrOrigin != null ? xrOrigin.GetComponent<CharacterController>() : null;
+            bool wasControllerEnabled = characterController != null && characterController.enabled;
+
+            if (characterController != null)
+                characterController.enabled = false;
+
             if (xrRig != null)
             {
                 xrRig.MoveCameraToWorldLocation(cameraWorldPosition);
-                return;
+            }
+            else if (mainCamera != null)
+            {
+                xrOrigin.position += cameraWorldPosition - mainCamera.transform.position;
+            }
+            else
+            {
+                xrOrigin.position = cameraWorldPosition;
             }
 
-            if (mainCamera != null)
-                xrOrigin.position += cameraWorldPosition - mainCamera.transform.position;
-            else
-                xrOrigin.position = cameraWorldPosition;
+            if (characterController != null)
+                characterController.enabled = wasControllerEnabled;
+
+            Physics.SyncTransforms();
         }
 
         private void LookAtCouch(Vector3 target)
@@ -282,9 +309,22 @@ namespace EDNXR.Gameplay
             if (direction.sqrMagnitude > 0.001f)
             {
                 if (xrRig != null)
+                {
+                    CharacterController characterController = xrOrigin != null ? xrOrigin.GetComponent<CharacterController>() : null;
+                    bool wasControllerEnabled = characterController != null && characterController.enabled;
+
+                    if (characterController != null)
+                        characterController.enabled = false;
+
                     xrRig.MatchOriginUpCameraForward(Vector3.up, direction.normalized);
+
+                    if (characterController != null)
+                        characterController.enabled = wasControllerEnabled;
+                }
                 else
+                {
                     xrOrigin.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+                }
             }
         }
 

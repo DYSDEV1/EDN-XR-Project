@@ -1,6 +1,11 @@
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.XR;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace EDNXR.Gameplay
 {
@@ -12,7 +17,8 @@ namespace EDNXR.Gameplay
             CreateUranium,
             PrepareDelivery,
             Deliver,
-            Completed
+            ReturnToSleep,
+            Finished
         }
 
         private struct HaloInfo
@@ -34,25 +40,42 @@ namespace EDNXR.Gameplay
         [SerializeField] private string createUraniumMessage = "Creer de l'uranium";
         [SerializeField] private string prepareDeliveryMessage = "Preparer l'uranium pour la livraison";
         [SerializeField] private string deliverMessage = "Donner la livraison";
-        [SerializeField] private string completedMessage = "Livraison terminee";
+        [SerializeField] private string returnToSleepMessage = "Repartir dormir";
+        [SerializeField] private string finishedMessage = "Session termin\u00e9e";
+        [SerializeField] private string finalTitle = "Merci d'avoir jou\u00e9";
+        [SerializeField] private string finalProducerLine = "Producteur : Etienne Baillieux";
+        [SerializeField] private string finalInternLine = "Stagiaire : Vianney Lehu";
+        [SerializeField] private string finalTimePrefix = "Temps final : ";
+        [SerializeField] private string replayPromptLine = "Appuyez sur R ou A pour rejouer";
         [SerializeField] private string worktableName = "WorkTable";
         [SerializeField] private string doorName = "Door";
+        [SerializeField] private string couchName = "Couch";
         [SerializeField] private string doorBellClipName = "sonette";
         [SerializeField] private float deliveryDistance = 1.25f;
         [SerializeField] private float haloScale = 1.35f;
         [SerializeField] private float haloPulseSpeed = 4.2f;
         [SerializeField] private Color haloColor = new Color(1f, 0.88f, 0.25f);
+        [SerializeField] private Vector3 vrEndCanvasLocalPosition = new Vector3(0f, 0f, 1.05f);
+        [SerializeField] private Vector2 vrEndCanvasSize = new Vector2(2.6f, 1.7f);
 
         private readonly List<HaloInfo> halos = new List<HaloInfo>();
 
         private Step currentStep = Step.WaitingForDoor;
         private Transform worktable;
         private Transform door;
+        private Transform couch;
         private AudioSource doorBellSource;
         private AudioClip doorBellClip;
         private Camera mainCamera;
         private Texture2D haloTexture;
+        private Canvas endCanvas;
+        private string finalTimeLine = "Temps final : 00:00";
+        private float replayInputEnabledTime;
         private bool firstWorktableSpawnSeen;
+        private bool endMovementLocked;
+        private bool replaying;
+        private bool leftReplayButtonWasPressed;
+        private bool rightReplayButtonWasPressed;
 
         private void Awake()
         {
@@ -73,7 +96,15 @@ namespace EDNXR.Gameplay
             if (Instance == this)
                 Instance = null;
 
+            StopDoorBell();
             ClearHalos();
+            DestroyEndCanvas();
+
+            if (endMovementLocked)
+            {
+                PlayerMovementLock.Unlock("end screen destroyed");
+                endMovementLocked = false;
+            }
         }
 
         private void Update()
@@ -82,6 +113,9 @@ namespace EDNXR.Gameplay
 
             if (currentStep == Step.Deliver)
                 TryCompleteDeliveryNearDoor();
+
+            if (currentStep == Step.Finished)
+                TryReplayFromEndScreen();
         }
 
         public static void NotifyDoorOpened()
@@ -145,7 +179,7 @@ namespace EDNXR.Gameplay
 
         private void StartPrepareDeliveryObjective()
         {
-            if (currentStep == Step.Deliver || currentStep == Step.Completed)
+            if (currentStep == Step.Deliver || currentStep == Step.ReturnToSleep || currentStep == Step.Finished)
                 return;
 
             currentStep = Step.PrepareDelivery;
@@ -164,7 +198,7 @@ namespace EDNXR.Gameplay
 
         private void StartDeliverObjective(CardboxBaseController cardbox)
         {
-            if (currentStep == Step.Completed)
+            if (currentStep == Step.ReturnToSleep || currentStep == Step.Finished)
                 return;
 
             currentStep = Step.Deliver;
@@ -210,15 +244,121 @@ namespace EDNXR.Gameplay
 
         private void CompleteDelivery(CardboxBaseController cardbox)
         {
-            currentStep = Step.Completed;
             StopDoorBell();
             ClearHalos();
-            SetObjective(completedMessage);
 
             if (cardbox != null)
                 cardbox.ConsumeForDelivery();
 
             Debug.Log($"[UraniumDeliveryObjective] Delivery completed with '{(cardbox != null ? cardbox.name : "unknown")}'.");
+            StartReturnToSleepObjective();
+        }
+
+        private void StartReturnToSleepObjective()
+        {
+            currentStep = Step.ReturnToSleep;
+            SetObjective(returnToSleepMessage);
+            ResolveReferences();
+            ClearHalos();
+
+            if (couch != null)
+            {
+                AddHalo(couch, "Return To Sleep Halo");
+                EnsureSleepInteractable(couch);
+            }
+            else
+            {
+                Debug.LogWarning($"[UraniumDeliveryObjective] Cannot start sleep objective: no object named '{couchName}' found.");
+            }
+
+            Debug.Log("[UraniumDeliveryObjective] Final objective active: return to sleep.");
+        }
+
+        public void TryReturnToSleep()
+        {
+            if (currentStep != Step.ReturnToSleep)
+                return;
+
+            currentStep = Step.Finished;
+            ClearHalos();
+            SetObjective(finishedMessage);
+            finalTimeLine = finalTimePrefix + LevelTimerController.FormatTime(LevelTimerController.NotifyLevelFinished());
+            replayInputEnabledTime = Time.time + 0.55f;
+            leftReplayButtonWasPressed = IsXRReplayButtonDown(UnityEngine.XR.XRNode.LeftHand);
+            rightReplayButtonWasPressed = IsXRReplayButtonDown(UnityEngine.XR.XRNode.RightHand);
+
+            if (!endMovementLocked)
+            {
+                PlayerMovementLock.Lock("end screen");
+                endMovementLocked = true;
+            }
+
+            BuildEndScreen();
+            Debug.Log("[UraniumDeliveryObjective] End screen displayed.");
+        }
+
+        private void TryReplayFromEndScreen()
+        {
+            if (replaying || Time.time < replayInputEnabledTime)
+                return;
+
+            if (!ReplayPressed())
+                return;
+
+            replaying = true;
+            SetObjective("Redemarrage...");
+            SessionResetButton.ResetSessionNow("end screen replay");
+        }
+
+        private bool ReplayPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null
+                && (Keyboard.current.rKey.wasPressedThisFrame
+                    || Keyboard.current.enterKey.wasPressedThisFrame
+                    || Keyboard.current.spaceKey.wasPressedThisFrame))
+            {
+                return true;
+            }
+#endif
+
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(KeyCode.R)
+                || Input.GetKeyDown(KeyCode.Return)
+                || Input.GetKeyDown(KeyCode.Space))
+            {
+                return true;
+            }
+#endif
+
+            return XRReplayButtonPressed(UnityEngine.XR.XRNode.LeftHand, ref leftReplayButtonWasPressed)
+                || XRReplayButtonPressed(UnityEngine.XR.XRNode.RightHand, ref rightReplayButtonWasPressed);
+        }
+
+        private bool XRReplayButtonPressed(UnityEngine.XR.XRNode node, ref bool wasPressed)
+        {
+            bool pressed = IsXRReplayButtonDown(node);
+            bool justPressed = pressed && !wasPressed;
+            wasPressed = pressed;
+            return justPressed;
+        }
+
+        private bool IsXRReplayButtonDown(UnityEngine.XR.XRNode node)
+        {
+            UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+
+            if (!device.isValid)
+                return false;
+
+            bool pressed;
+
+            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out pressed) && pressed)
+                return true;
+
+            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out pressed) && pressed)
+                return true;
+
+            return false;
         }
 
         private void StartDoorBell()
@@ -295,6 +435,125 @@ namespace EDNXR.Gameplay
                     Debug.Log($"[UraniumDeliveryObjective] Delivery door resolved by exact name: '{door.name}'.");
                 }
             }
+
+            if (couch == null)
+            {
+                GameObject foundCouch = GameObject.Find(couchName);
+                if (foundCouch != null)
+                    couch = foundCouch.transform;
+            }
+        }
+
+        private void EnsureSleepInteractable(Transform target)
+        {
+            ReturnToSleepObjectiveInteractable interactable = target.GetComponent<ReturnToSleepObjectiveInteractable>();
+
+            if (interactable == null)
+                interactable = target.gameObject.AddComponent<ReturnToSleepObjectiveInteractable>();
+
+            interactable.Configure(this);
+        }
+
+        private void BuildEndScreen()
+        {
+            DestroyEndCanvas();
+
+            GameObject canvasObject = new GameObject("End Screen Canvas");
+            canvasObject.transform.SetParent(transform, false);
+            endCanvas = canvasObject.AddComponent<Canvas>();
+            endCanvas.sortingOrder = 3000;
+            canvasObject.AddComponent<CanvasScaler>();
+            canvasObject.AddComponent<GraphicRaycaster>();
+            ConfigureEndCanvas(endCanvas);
+
+            GameObject backgroundObject = new GameObject("End Screen Background");
+            backgroundObject.transform.SetParent(canvasObject.transform, false);
+            Image background = backgroundObject.AddComponent<Image>();
+            background.color = Color.black;
+            RectTransform backgroundRect = background.rectTransform;
+            backgroundRect.anchorMin = Vector2.zero;
+            backgroundRect.anchorMax = Vector2.one;
+            backgroundRect.offsetMin = Vector2.zero;
+            backgroundRect.offsetMax = Vector2.zero;
+
+            TMP_Text title = CreateEndText("End Title", canvasObject.transform);
+            title.text = finalTitle;
+            title.fontSize = 76f;
+            title.fontStyle = FontStyles.Bold;
+            RectTransform titleRect = title.rectTransform;
+            titleRect.anchorMin = new Vector2(0.08f, 0.48f);
+            titleRect.anchorMax = new Vector2(0.92f, 0.68f);
+            titleRect.offsetMin = Vector2.zero;
+            titleRect.offsetMax = Vector2.zero;
+
+            TMP_Text time = CreateEndText("End Final Time", canvasObject.transform);
+            time.text = finalTimeLine;
+            time.fontSize = 40f;
+            time.fontStyle = FontStyles.Bold;
+            RectTransform timeRect = time.rectTransform;
+            timeRect.anchorMin = new Vector2(0.08f, 0.38f);
+            timeRect.anchorMax = new Vector2(0.92f, 0.46f);
+            timeRect.offsetMin = Vector2.zero;
+            timeRect.offsetMax = Vector2.zero;
+
+            TMP_Text credits = CreateEndText("End Credits", canvasObject.transform);
+            credits.text = finalProducerLine + "\n" + finalInternLine;
+            credits.fontSize = 42f;
+            credits.fontStyle = FontStyles.Normal;
+            RectTransform creditsRect = credits.rectTransform;
+            creditsRect.anchorMin = new Vector2(0.08f, 0.16f);
+            creditsRect.anchorMax = new Vector2(0.92f, 0.34f);
+            creditsRect.offsetMin = Vector2.zero;
+            creditsRect.offsetMax = Vector2.zero;
+
+            TMP_Text replay = CreateEndText("End Replay Prompt", canvasObject.transform);
+            replay.text = replayPromptLine;
+            replay.fontSize = 32f;
+            replay.fontStyle = FontStyles.Normal;
+            RectTransform replayRect = replay.rectTransform;
+            replayRect.anchorMin = new Vector2(0.08f, 0.045f);
+            replayRect.anchorMax = new Vector2(0.92f, 0.12f);
+            replayRect.offsetMin = Vector2.zero;
+            replayRect.offsetMax = Vector2.zero;
+        }
+
+        private void ConfigureEndCanvas(Canvas canvas)
+        {
+            if (!XRSettings.isDeviceActive || Camera.main == null)
+            {
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                return;
+            }
+
+            Camera camera = Camera.main;
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = camera;
+            RectTransform rectTransform = canvas.GetComponent<RectTransform>();
+            rectTransform.SetParent(camera.transform, false);
+            rectTransform.localPosition = vrEndCanvasLocalPosition;
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one * 0.001f;
+            rectTransform.sizeDelta = vrEndCanvasSize * 1000f;
+        }
+
+        private TMP_Text CreateEndText(string objectName, Transform parent)
+        {
+            GameObject textObject = new GameObject(objectName);
+            textObject.transform.SetParent(parent, false);
+            TMP_Text text = textObject.AddComponent<TextMeshProUGUI>();
+            text.color = Color.white;
+            text.alignment = TextAlignmentOptions.Center;
+            text.enableWordWrapping = true;
+            return text;
+        }
+
+        private void DestroyEndCanvas()
+        {
+            if (endCanvas == null)
+                return;
+
+            Destroy(endCanvas.gameObject);
+            endCanvas = null;
         }
 
         private void AddHalo(Transform target, string haloName)

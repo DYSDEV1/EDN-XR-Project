@@ -30,6 +30,12 @@ namespace EDNXR.Gameplay
             SetMessage(startingMessage);
         }
 
+        private void OnDestroy()
+        {
+            if (Instance == this)
+                Instance = null;
+        }
+
         private void LateUpdate()
         {
             if (!XRSettings.isDeviceActive || canvas == null)

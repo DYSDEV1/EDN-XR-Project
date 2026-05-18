@@ -1,9 +1,17 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace EDNXR.Gameplay
 {
     public static class CardboxBaseBootstrap
     {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void RegisterSceneLoadedCallback()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureCardboxBases()
         {
@@ -33,6 +41,11 @@ namespace EDNXR.Gameplay
         {
             return !string.IsNullOrWhiteSpace(objectName)
                 && objectName.StartsWith("CardboxBase", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            EnsureCardboxBases();
         }
     }
 }
