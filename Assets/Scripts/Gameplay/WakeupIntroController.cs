@@ -294,15 +294,6 @@ namespace EDNXR.Gameplay
         {
             Vector3 direction = couch != null ? couch.forward : Vector3.forward;
 
-            if (mainCamera != null)
-            {
-                Vector3 initialCameraDirection = mainCamera.transform.position - bounds.center;
-                initialCameraDirection.y = 0f;
-
-                if (initialCameraDirection.sqrMagnitude > 0.25f)
-                    direction = initialCameraDirection.normalized;
-            }
-
             direction.y = 0f;
 
             if (direction.sqrMagnitude <= 0.001f)
