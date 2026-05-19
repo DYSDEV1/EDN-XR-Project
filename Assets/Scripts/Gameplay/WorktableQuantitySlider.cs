@@ -11,7 +11,7 @@ namespace EDNXR.Gameplay
     public class WorktableQuantitySlider : MonoBehaviour
     {
         private const float JoystickDeadzone = 0.18f;
-        private const float JoystickNormalizedSpeed = 0.75f;
+        private const float JoystickStepInterval = 0.16f;
 
         private WorktableParticleSpawner spawner;
         private Camera cachedCamera;
@@ -21,6 +21,8 @@ namespace EDNXR.Gameplay
         private float lockStartQuantityNormalized;
         private float lockStartInteractorNormalized;
         private float joystickNormalizedOffset;
+        private float nextJoystickStepTime;
+        private int lastJoystickStepDirection;
 
         public void Configure(WorktableParticleSpawner owner)
         {
@@ -61,6 +63,8 @@ namespace EDNXR.Gameplay
                 : null;
             isVrLocked = true;
             joystickNormalizedOffset = 0f;
+            nextJoystickStepTime = 0f;
+            lastJoystickStepDirection = 0;
             lockStartQuantityNormalized = spawner.GetQuantityNormalized();
             lockStartInteractorNormalized = lockedInteractor != null
                 ? spawner.GetQuantityNormalizedFromWorldPoint(lockedInteractor.position)
@@ -79,6 +83,8 @@ namespace EDNXR.Gameplay
             isVrLocked = false;
             lockedInteractor = null;
             joystickNormalizedOffset = 0f;
+            nextJoystickStepTime = 0f;
+            lastJoystickStepDirection = 0;
         }
 
         private void UpdateLockedVrSelection()
@@ -95,10 +101,33 @@ namespace EDNXR.Gameplay
             }
 
             float joystickX = ReadJoystickX();
-            if (Mathf.Abs(joystickX) > 0f)
-                joystickNormalizedOffset += joystickX * JoystickNormalizedSpeed * Time.deltaTime;
+            UpdateJoystickStepOffset(joystickX);
 
             spawner.SetQuantityFromNormalized(normalized + joystickNormalizedOffset);
+        }
+
+        private void UpdateJoystickStepOffset(float joystickX)
+        {
+            int direction = Mathf.Abs(joystickX) > 0f ? (int)Mathf.Sign(joystickX) : 0;
+
+            if (direction == 0)
+            {
+                lastJoystickStepDirection = 0;
+                nextJoystickStepTime = 0f;
+                return;
+            }
+
+            if (direction != lastJoystickStepDirection)
+            {
+                lastJoystickStepDirection = direction;
+                nextJoystickStepTime = 0f;
+            }
+
+            if (Time.time < nextJoystickStepTime)
+                return;
+
+            joystickNormalizedOffset += direction * spawner.GetQuantityStepNormalized();
+            nextJoystickStepTime = Time.time + JoystickStepInterval;
         }
 
         private void OnMouseDown()

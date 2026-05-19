@@ -38,9 +38,31 @@ namespace EDNXR.Gameplay
         private bool introStarted;
         private bool wakingUp;
         private bool movementLocked;
+        private Vector3 awakeDirection;
+        private bool hasAwakeDirection;
 
         private void Start()
         {
+            StartCoroutine(BeginIntroWhenReady());
+        }
+
+        private IEnumerator BeginIntroWhenReady()
+        {
+            // At first app launch, XR tracking can arrive just after Start. Waiting a frame
+            // keeps the initial spawn calculation consistent with scene reloads.
+            for (int i = 0; i < 30; i++)
+            {
+                if (FindTransformByName(xrOriginName) != null && FindTransformByName(couchName) != null && Camera.main != null)
+                {
+                    yield return null;
+                    yield return new WaitForEndOfFrame();
+                    BeginIntro();
+                    yield break;
+                }
+
+                yield return null;
+            }
+
             BeginIntro();
         }
 
@@ -59,6 +81,7 @@ namespace EDNXR.Gameplay
 
             introStarted = true;
 
+            CacheAwakeDirection();
             BuildOverlay();
             SetupAudio();
             ApplySleepingAudioMuffle();
@@ -251,23 +274,41 @@ namespace EDNXR.Gameplay
 
         private Vector3 GetCouchFrontPosition(Bounds bounds)
         {
-            Vector3 awayFromCouch = couch.forward;
-
-            if (mainCamera != null)
-            {
-                Vector3 cameraDirection = mainCamera.transform.position - bounds.center;
-                cameraDirection.y = 0f;
-
-                if (cameraDirection.sqrMagnitude > 0.001f)
-                    awayFromCouch = cameraDirection.normalized;
-            }
-
+            Vector3 awayFromCouch = hasAwakeDirection ? awakeDirection : GetStableAwakeDirection(bounds);
             awayFromCouch.y = 0f;
             awayFromCouch.Normalize();
 
             Vector3 position = bounds.center + awayFromCouch * frontDistance;
             position.y = bounds.min.y + awakeEyeHeight;
             return position;
+        }
+
+        private void CacheAwakeDirection()
+        {
+            Bounds bounds = GetCouchBounds();
+            awakeDirection = GetStableAwakeDirection(bounds);
+            hasAwakeDirection = awakeDirection.sqrMagnitude > 0.001f;
+        }
+
+        private Vector3 GetStableAwakeDirection(Bounds bounds)
+        {
+            Vector3 direction = couch != null ? couch.forward : Vector3.forward;
+
+            if (mainCamera != null)
+            {
+                Vector3 initialCameraDirection = mainCamera.transform.position - bounds.center;
+                initialCameraDirection.y = 0f;
+
+                if (initialCameraDirection.sqrMagnitude > 0.25f)
+                    direction = initialCameraDirection.normalized;
+            }
+
+            direction.y = 0f;
+
+            if (direction.sqrMagnitude <= 0.001f)
+                direction = Vector3.forward;
+
+            return direction.normalized;
         }
 
         private void MoveCameraToWorldPosition(Vector3 cameraWorldPosition)
@@ -396,26 +437,29 @@ namespace EDNXR.Gameplay
 
         private bool IsXRWakeButtonPressed()
         {
-            return IsXRButtonPressed(UnityEngine.XR.XRNode.LeftHand)
-                || IsXRButtonPressed(UnityEngine.XR.XRNode.RightHand);
+            return IsXRPrimaryButtonPressed(UnityEngine.XR.XRNode.RightHand)
+                || IsXRTriggerPressed(UnityEngine.XR.XRNode.LeftHand)
+                || IsXRTriggerPressed(UnityEngine.XR.XRNode.RightHand);
         }
 
-        private bool IsXRButtonPressed(UnityEngine.XR.XRNode node)
+        private bool IsXRPrimaryButtonPressed(UnityEngine.XR.XRNode node)
         {
             UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
 
             if (!device.isValid)
                 return false;
 
-            bool pressed;
+            return device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool pressed) && pressed;
+        }
 
-            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out pressed) && pressed)
-                return true;
+        private bool IsXRTriggerPressed(UnityEngine.XR.XRNode node)
+        {
+            UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
 
-            if (device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out pressed) && pressed)
-                return true;
+            if (!device.isValid)
+                return false;
 
-            return false;
+            return device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out bool pressed) && pressed;
         }
 
         private string BuildPromptText()

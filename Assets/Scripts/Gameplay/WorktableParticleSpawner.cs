@@ -200,6 +200,12 @@ namespace EDNXR.Gameplay
             return Mathf.InverseLerp(minQuantity, maxQuantity, selectedQuantity);
         }
 
+        public float GetQuantityStepNormalized()
+        {
+            int quantityRange = Mathf.Max(1, maxQuantity - minQuantity);
+            return 1f / quantityRange;
+        }
+
         private void SetQuantity(int quantity)
         {
             selectedQuantity = Mathf.Clamp(quantity, minQuantity, maxQuantity);

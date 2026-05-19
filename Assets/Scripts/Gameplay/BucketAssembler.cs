@@ -105,6 +105,7 @@ namespace EDNXR.Gameplay
         [SerializeField] private float timingMiniGameDuration = 4f;
         [SerializeField] private int timingMiniGameSteps = 3;
         [SerializeField] private float timingCursorSpeed = 1.4f;
+        [SerializeField] private float timingCursorSpeedMultiplier = 0.7f;
         [SerializeField, Range(0.05f, 0.8f)] private float timingGreenZoneSize = 0.22f;
         [SerializeField] private string timingSuccessClipName = "success";
         [SerializeField] private float timingSuccessClipDuration = 1.4f;
@@ -112,6 +113,8 @@ namespace EDNXR.Gameplay
         [SerializeField, Range(0f, 1f)] private float memoryMiniGameChance = 1f;
         [SerializeField] private float memoryRevealDuration = 2f;
         [SerializeField] private float memorySolveDuration = 8f;
+        [SerializeField] private float memoryNumberFontSize = 11f;
+        [SerializeField] private float memoryNumberScale = 0.24f;
 
         [Header("Wrong Recipe Explosion")]
         [SerializeField] private float explosionEffectHeight = 0.45f;
@@ -165,6 +168,7 @@ namespace EDNXR.Gameplay
         private bool memoryMiniGameInputActive;
         private int memoryMiniGameExpectedStep;
         private int memoryMiniGameSelectedCell = -1;
+        private float nextUraniumRejectFeedbackTime;
 
         private enum ShakeAxis
         {
@@ -625,8 +629,13 @@ namespace EDNXR.Gameplay
                 return;
             }
 
-            Debug.Log($"[BucketAssembler] Consuming ingredient: {ingredient.DisplayName} (type={ingredient.Type})");
             ParticlePacket packet = GetParticlePacket(other);
+            IngredientType type = packet != null ? packet.Type : ingredient.Type;
+
+            if (!CanAcceptIngredientType(type))
+                return;
+
+            Debug.Log($"[BucketAssembler] Consuming ingredient: {ingredient.DisplayName} (type={type})");
             AddIngredient(ingredient, packet);
         }
 
@@ -634,6 +643,9 @@ namespace EDNXR.Gameplay
         {
             IngredientType type = packet != null ? packet.Type : ingredient.Type;
             int amount = packet != null ? packet.Count : 1;
+
+            if (!CanAcceptIngredientType(type))
+                return;
 
             if (!currentCounts.ContainsKey(type))
                 currentCounts[type] = 0;
@@ -928,7 +940,7 @@ namespace EDNXR.Gameplay
 
             while (Time.time < endTime && paintCan != null)
             {
-                cursor += cursorDirection * timingCursorSpeed * Time.deltaTime;
+                cursor += cursorDirection * timingCursorSpeed * timingCursorSpeedMultiplier * Time.deltaTime;
 
                 if (cursor >= 1f)
                 {
@@ -1039,11 +1051,19 @@ namespace EDNXR.Gameplay
 
         private bool TrySelectMemoryCellFromAim()
         {
+            if (IsVrActive())
+            {
+                return TrySelectMemoryCellFromXRRayInteractor("Right")
+                    || TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.RightHand, "RightHand XRNode");
+            }
+
             if (TrySelectMemoryCellFromCamera())
                 return true;
 
-            return TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.RightHand)
-                || TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.LeftHand);
+            return TrySelectMemoryCellFromXRRayInteractor("Right")
+                || TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.RightHand, "RightHand XRNode")
+                || TrySelectMemoryCellFromXRRayInteractor("Left")
+                || TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode.LeftHand, "LeftHand XRNode");
         }
 
         private bool TrySelectMemoryCellFromCamera()
@@ -1054,10 +1074,44 @@ namespace EDNXR.Gameplay
                 return false;
 
             Ray ray = new Ray(camera.transform.position, camera.transform.forward);
-            return TrySelectMemoryCellFromRay(ray);
+            return TrySelectMemoryCellFromRay(ray, "Camera");
         }
 
-        private bool TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode node)
+        private bool TrySelectMemoryCellFromXRRayInteractor(string handName)
+        {
+            XRRayInteractor[] interactors = FindObjectsOfType<XRRayInteractor>(true);
+
+            for (int i = 0; i < interactors.Length; i++)
+            {
+                XRRayInteractor interactor = interactors[i];
+
+                if (interactor == null || !interactor.isActiveAndEnabled)
+                    continue;
+
+                if (!HasNameInParents(interactor.transform, handName))
+                    continue;
+
+                if (interactor.TryGetCurrent3DRaycastHit(out RaycastHit hit)
+                    && TrySelectMemoryCellFromCollider(hit.collider, $"{handName} XRRayInteractor hit"))
+                {
+                    return true;
+                }
+
+                Transform rayOrigin = interactor.rayOriginTransform != null
+                    ? interactor.rayOriginTransform
+                    : interactor.transform;
+
+                if (rayOrigin != null
+                    && TrySelectMemoryCellFromRay(new Ray(rayOrigin.position, rayOrigin.forward), $"{handName} XRRayInteractor ray"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TrySelectMemoryCellFromXRNode(UnityEngine.XR.XRNode node, string source)
         {
             UnityEngine.XR.InputDevice device = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
 
@@ -1070,10 +1124,10 @@ namespace EDNXR.Gameplay
             if (!device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.deviceRotation, out Quaternion rotation))
                 return false;
 
-            return TrySelectMemoryCellFromRay(new Ray(position, rotation * Vector3.forward));
+            return TrySelectMemoryCellFromRay(new Ray(position, rotation * Vector3.forward), source);
         }
 
-        private bool TrySelectMemoryCellFromRay(Ray ray)
+        private bool TrySelectMemoryCellFromRay(Ray ray, string source)
         {
             RaycastHit[] hits = Physics.RaycastAll(ray, 8f, ~0, QueryTriggerInteraction.Collide);
 
@@ -1100,6 +1154,21 @@ namespace EDNXR.Gameplay
                 return false;
 
             SelectMemoryMiniGameCell(bestCell.CellIndex);
+            Debug.Log($"[BucketAssembler] Memory selected cell {bestCell.CellIndex} via {source}. expected={memoryMiniGameExpectedStep + 1}");
+            return true;
+        }
+
+        private bool TrySelectMemoryCellFromCollider(Collider collider, string source)
+        {
+            MemoryMiniGameCell cell = collider != null
+                ? collider.GetComponentInParent<MemoryMiniGameCell>()
+                : null;
+
+            if (cell == null)
+                return false;
+
+            SelectMemoryMiniGameCell(cell.CellIndex);
+            Debug.Log($"[BucketAssembler] Memory selected cell {cell.CellIndex} via {source}. expected={memoryMiniGameExpectedStep + 1}");
             return true;
         }
 
@@ -1152,14 +1221,14 @@ namespace EDNXR.Gameplay
                 GameObject labelObject = new GameObject($"Memory Cell Label {i}");
                 labelObject.transform.SetParent(cell.transform, false);
                 labelObject.transform.localPosition = new Vector3(0f, 0f, -0.55f);
-                labelObject.transform.localScale = Vector3.one * 0.16f;
+                labelObject.transform.localScale = Vector3.one * memoryNumberScale;
                 TMP_Text label = labelObject.AddComponent<TextMeshPro>();
                 label.alignment = TextAlignmentOptions.Center;
                 label.fontStyle = FontStyles.Bold;
-                label.fontSize = 5.5f;
+                label.fontSize = memoryNumberFontSize;
                 label.color = Color.white;
                 label.text = "";
-                label.rectTransform.sizeDelta = new Vector2(1.2f, 1.2f);
+                label.rectTransform.sizeDelta = new Vector2(1.8f, 1.8f);
                 labels[i] = label;
             }
 
@@ -1253,13 +1322,13 @@ namespace EDNXR.Gameplay
 
         private void SetTimingMiniGameText(float remaining, int step, int totalSteps)
         {
-            SetText($"Timing {step}/{totalSteps} ! {remaining:F1}s\nAppuie sur E quand la barre blanche est dans le vert.");
+            SetText($"Timing {step}/{totalSteps} ! {remaining:F1}s\nAppuie sur A quand la barre blanche est dans le vert.");
 
             if (contentsLabel != null)
             {
                 contentsLabel.text =
                     $"TIMING {step}/{totalSteps}\n" +
-                    "E DANS LE VERT\n" +
+                    "A DANS LE VERT\n" +
                     $"{remaining:F1}s";
             }
         }
@@ -1276,7 +1345,7 @@ namespace EDNXR.Gameplay
                 return;
             }
 
-            SetText($"Memoire ! Reproduis le schema. {remaining:F1}s\nVise une case puis appuie sur E/A.");
+            SetText($"Memoire ! Reproduis le schema. {remaining:F1}s\nVise une case puis appuie sur A.");
 
             if (contentsLabel != null)
             {
@@ -1367,12 +1436,16 @@ namespace EDNXR.Gameplay
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
                 return true;
 
+            if (Keyboard.current != null && Keyboard.current.aKey.wasPressedThisFrame)
+                return true;
+
             if (Gamepad.current != null && Gamepad.current.buttonSouth.wasPressedThisFrame)
                 return true;
 #endif
 
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(KeyCode.E)
+                || Input.GetKeyDown(KeyCode.A)
                 || Input.GetKeyDown(KeyCode.JoystickButton0)
                 || Input.GetKeyDown(KeyCode.JoystickButton14)
                 || Input.GetKeyDown(KeyCode.JoystickButton15))
@@ -1381,8 +1454,7 @@ namespace EDNXR.Gameplay
             }
 #endif
 
-            return XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode.LeftHand, ref leftTimingButtonWasPressed)
-                || XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode.RightHand, ref rightTimingButtonWasPressed);
+            return XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode.RightHand, ref rightTimingButtonWasPressed);
         }
 
         private bool XRPrimaryPressedThisFrame(UnityEngine.XR.XRNode node, ref bool wasPressed)
@@ -2649,6 +2721,23 @@ namespace EDNXR.Gameplay
             return false;
         }
 
+        private bool CanAcceptIngredientType(IngredientType type)
+        {
+            if (isPaintCanTriggerZone && type == IngredientType.Uranium)
+            {
+                if (Time.time >= nextUraniumRejectFeedbackTime)
+                {
+                    nextUraniumRejectFeedbackTime = Time.time + 1f;
+                    Debug.Log("[BucketAssembler] PaintCan ignored uranium ingredient.");
+                    SetText("La PaintCan ne peut pas prendre l'uranium.");
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+
         private bool IsPlayerOrInteractorCollider(Collider other)
         {
             if (other == null)
@@ -2710,6 +2799,27 @@ namespace EDNXR.Gameplay
             return false;
         }
 
+        private bool HasNameInParents(Transform source, string namePart)
+        {
+            if (string.IsNullOrWhiteSpace(namePart))
+                return false;
+
+            Transform current = source;
+
+            while (current != null)
+            {
+                if (!string.IsNullOrWhiteSpace(current.name)
+                    && current.name.IndexOf(namePart, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
         private string BuildTransformPath(Transform source)
         {
             if (source == null)
@@ -2733,6 +2843,9 @@ namespace EDNXR.Gameplay
         /// </summary>
         public void AddIngredientDirect(IngredientType type, int amount)
         {
+            if (!CanAcceptIngredientType(type))
+                return;
+
             if (!currentCounts.ContainsKey(type))
                 currentCounts[type] = 0;
 

@@ -1,7 +1,11 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.XR;
 using UnityEngine.XR.Interaction.Toolkit;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace EDNXR.Gameplay
 {
@@ -13,6 +17,7 @@ namespace EDNXR.Gameplay
 
         private TMP_Text label;
         private bool isResetting;
+        private bool leftPrimaryWasPressed;
         private static bool resetInProgress;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -76,6 +81,15 @@ namespace EDNXR.Gameplay
                 label.transform.rotation = Quaternion.LookRotation(toLabel.normalized, Vector3.up);
         }
 
+        private void Update()
+        {
+            if (!isResetting && ResetHotkeyPressedThisFrame())
+            {
+                isResetting = true;
+                ResetSessionNow("left controller X button");
+            }
+        }
+
         private void OnMouseDown()
         {
             ResetSession();
@@ -109,6 +123,34 @@ namespace EDNXR.Gameplay
         private void OnSelected(SelectEnterEventArgs args)
         {
             ResetSession();
+        }
+
+        private bool ResetHotkeyPressedThisFrame()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Gamepad.current != null && Gamepad.current.buttonWest.wasPressedThisFrame)
+                return true;
+#endif
+
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(KeyCode.JoystickButton2))
+                return true;
+#endif
+
+            UnityEngine.XR.InputDevice leftHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.LeftHand);
+
+            if (!leftHand.isValid)
+            {
+                leftPrimaryWasPressed = false;
+                return false;
+            }
+
+            if (!leftHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool pressed))
+                pressed = false;
+
+            bool pressedThisFrame = pressed && !leftPrimaryWasPressed;
+            leftPrimaryWasPressed = pressed;
+            return pressedThisFrame;
         }
 
         private static void ResetRuntimeState()
