@@ -4,6 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Events;
+using Unity.XR.CoreUtils;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
@@ -147,6 +148,11 @@ namespace EDNXR.Gameplay
         private Quaternion originalCameraLocalRot;
         private bool deathMovedCamera;
         private bool deathMovementLocked;
+        private Transform deathVrOrigin;
+        private XROrigin deathVrRig;
+        private CharacterController deathVrCharacterController;
+        private bool deathVrCharacterControllerWasEnabled;
+        private bool deathPreparedVrRig;
         private float deathInputEnabledTime;
         private bool isPaintCanTriggerZone = false;
         private bool isRecipeMiniGameActive = false;
@@ -280,6 +286,8 @@ namespace EDNXR.Gameplay
                 PlayerMovementLock.Unlock("recipe death destroyed");
                 deathMovementLocked = false;
             }
+
+            RestoreVrDeathState();
         }
 
         /// <summary>
@@ -476,6 +484,9 @@ namespace EDNXR.Gameplay
                 if (colliders[i] == null || colliders[i].transform == transform)
                     continue;
 
+                if (IsPlayerOrInteractorCollider(colliders[i]))
+                    continue;
+
                 if (IsMixerTool(colliders[i]))
                     continue;
 
@@ -554,6 +565,9 @@ namespace EDNXR.Gameplay
             if (other == null)
                 return true;
 
+            if (IsPlayerOrInteractorCollider(other))
+                return true;
+
             if (other.attachedRigidbody != null)
                 return false;
 
@@ -591,6 +605,9 @@ namespace EDNXR.Gameplay
 
         private void ProcessIngredientCollider(Collider other)
         {
+            if (IsPlayerOrInteractorCollider(other))
+                return;
+
             if (IsCardboxBaseCollider(other))
                 return;
 
@@ -1521,6 +1538,7 @@ namespace EDNXR.Gameplay
 
         private void FailRecipeWithExplosion(string message)
         {
+            VrPaintCanDebugLog.Write($"failRecipeWithExplosion bucket='{name}' message='{message}' pos={VrPaintCanDebugLog.FormatVector(transform.position)} isVr={IsVrActive()}");
             SetText(message);
             SpawnWrongRecipeEffect();
             currentCounts.Clear();
@@ -1533,11 +1551,7 @@ namespace EDNXR.Gameplay
             Camera mainCam = Camera.main;
             if (IsVrActive())
             {
-                if (!deathMovementLocked)
-                {
-                    PlayerMovementLock.Lock("recipe death");
-                    deathMovementLocked = true;
-                }
+                PrepareVrDeathState(mainCam);
             }
             else if (mainCam != null)
             {
@@ -1636,6 +1650,8 @@ namespace EDNXR.Gameplay
                 deathMovedCamera = false;
             }
 
+            RestoreVrDeathState();
+
             PcPlayerController controller = FindObjectOfType<PcPlayerController>(true);
             if (controller != null) controller.enabled = true;
 
@@ -1662,6 +1678,168 @@ namespace EDNXR.Gameplay
             }
 
             isDead = false;
+        }
+
+        private void PrepareVrDeathState(Camera mainCam)
+        {
+            VrPaintCanDebugLog.Write($"prepareVrDeathState bucket='{name}' cam='{(mainCam != null ? mainCam.name : "null")}' bucketPos={VrPaintCanDebugLog.FormatVector(transform.position)}");
+
+            if (!deathMovementLocked)
+            {
+                PlayerMovementLock.Lock("recipe death");
+                deathMovementLocked = true;
+            }
+
+            Transform xrOrigin = FindVrOrigin(mainCam);
+
+            if (xrOrigin == null)
+            {
+                VrPaintCanDebugLog.Write("prepareVrDeathState no XR origin found");
+                return;
+            }
+
+            if (!deathPreparedVrRig)
+            {
+                deathVrOrigin = xrOrigin;
+                deathVrRig = xrOrigin.GetComponent<XROrigin>();
+                deathVrCharacterController = xrOrigin.GetComponent<CharacterController>();
+                deathVrCharacterControllerWasEnabled = deathVrCharacterController != null && deathVrCharacterController.enabled;
+                deathPreparedVrRig = true;
+            }
+
+            if (deathVrCharacterController != null)
+            {
+                VrCharacterControllerSafetyGuard.AllowTemporaryDisable("recipe death move", 0.5f);
+                deathVrCharacterController.enabled = false;
+            }
+
+            Vector3 deathCameraPosition = transform.position + new Vector3(0f, 1.65f, -2.2f);
+
+            if (deathVrRig != null)
+            {
+                deathVrRig.MoveCameraToWorldLocation(deathCameraPosition);
+                FaceVrCameraTowardDeathTarget(mainCam);
+            }
+            else if (mainCam != null)
+            {
+                deathVrOrigin.position += deathCameraPosition - mainCam.transform.position;
+                FaceTransformToward(deathVrOrigin, transform.position);
+            }
+            else
+            {
+                deathVrOrigin.position = deathCameraPosition;
+            }
+
+            StopPaintCanPhysics();
+
+            if (deathVrCharacterController != null)
+                deathVrCharacterController.enabled = true;
+
+            Physics.SyncTransforms();
+            VrPaintCanDebugLog.Write($"prepareVrDeathState applied xrOrigin='{xrOrigin.name}' originPos={VrPaintCanDebugLog.FormatVector(xrOrigin.position)} deathCameraTarget={VrPaintCanDebugLog.FormatVector(deathCameraPosition)} ccEnabledAfterMove={(deathVrCharacterController != null && deathVrCharacterController.enabled)}");
+        }
+
+        private void RestoreVrDeathState()
+        {
+            if (!deathPreparedVrRig)
+                return;
+
+            if (deathVrCharacterController != null)
+                deathVrCharacterController.enabled = deathVrCharacterControllerWasEnabled || IsVrActive();
+
+            VrPaintCanDebugLog.Write($"restoreVrDeathState origin='{(deathVrOrigin != null ? deathVrOrigin.name : "null")}' ccRestored={deathVrCharacterControllerWasEnabled}");
+            deathVrOrigin = null;
+            deathVrRig = null;
+            deathVrCharacterController = null;
+            deathPreparedVrRig = false;
+            Physics.SyncTransforms();
+        }
+
+        private Transform FindVrOrigin(Camera mainCam)
+        {
+            if (mainCam != null)
+            {
+                XROrigin origin = mainCam.GetComponentInParent<XROrigin>();
+
+                if (origin != null)
+                    return origin.transform;
+
+                Transform namedRoot = FindVrOriginParent(mainCam.transform);
+
+                if (namedRoot != null)
+                    return namedRoot;
+            }
+
+            XROrigin sceneOrigin = FindObjectOfType<XROrigin>(true);
+
+            if (sceneOrigin != null)
+                return sceneOrigin.transform;
+
+            Transform fallback = FindTransformByName("XR Origin (XR Rig)");
+            return fallback != null ? fallback : FindTransformByName("XR Origin");
+        }
+
+        private Transform FindVrOriginParent(Transform source)
+        {
+            Transform current = source;
+
+            while (current != null)
+            {
+                if (current.name.IndexOf("XR Origin", System.StringComparison.OrdinalIgnoreCase) >= 0
+                    || current.name.IndexOf("XR Rig", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return current;
+                }
+
+                current = current.parent;
+            }
+
+            return null;
+        }
+
+        private void FaceVrCameraTowardDeathTarget(Camera mainCam)
+        {
+            if (deathVrRig == null)
+                return;
+
+            if (mainCam == null)
+                mainCam = Camera.main;
+
+            Vector3 direction = transform.position - (mainCam != null ? mainCam.transform.position : deathVrOrigin.position);
+            direction.y = 0f;
+
+            if (direction.sqrMagnitude > 0.001f)
+                deathVrRig.MatchOriginUpCameraForward(Vector3.up, direction.normalized);
+        }
+
+        private void FaceTransformToward(Transform source, Vector3 target)
+        {
+            if (source == null)
+                return;
+
+            Vector3 direction = target - source.position;
+            direction.y = 0f;
+
+            if (direction.sqrMagnitude > 0.001f)
+                source.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+        }
+
+        private void StopPaintCanPhysics()
+        {
+            Rigidbody[] bodies = FindObjectsOfType<Rigidbody>(true);
+
+            for (int i = 0; i < bodies.Length; i++)
+            {
+                Rigidbody body = bodies[i];
+
+                if (body == null || !IsPaintCanName(body.name))
+                    continue;
+
+                body.velocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+                body.Sleep();
+                VrPaintCanDebugLog.Write($"stopPaintCanPhysics body='{body.name}' pos={VrPaintCanDebugLog.FormatVector(body.position)}");
+            }
         }
 
         private bool DeathRestartPressedInXR()
@@ -2321,6 +2499,9 @@ namespace EDNXR.Gameplay
 
         private IngredientBall GetValidIngredient(Collider other)
         {
+            if (IsPlayerOrInteractorCollider(other))
+                return null;
+
             if (IsCardboxBaseCollider(other))
                 return null;
 
@@ -2368,6 +2549,7 @@ namespace EDNXR.Gameplay
                     ingredient = ingredientObject.AddComponent<IngredientBall>();
 
                 ingredient.Configure(inferredType, inferredType.ToString());
+                Debug.LogWarning($"[BucketAssembler] Inferred ingredient {inferredType} from collider '{other.name}' path='{BuildTransformPath(other.transform)}'");
                 return ingredient;
             }
 
@@ -2408,34 +2590,141 @@ namespace EDNXR.Gameplay
             {
                 string objectName = current.name;
 
-                if (objectName.IndexOf("QuarkDown", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    || objectName.IndexOf("Down", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsIngredientWord(objectName, "QuarkDown")
+                    || (ContainsIngredientWord(objectName, "Quark") && ContainsIngredientWord(objectName, "Down"))
+                    || ContainsIngredientWord(objectName, "Down"))
                 {
                     return IngredientType.QuarkDown;
                 }
 
-                if (objectName.IndexOf("QuarkUp", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    || objectName.IndexOf("Up", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsIngredientWord(objectName, "QuarkUp")
+                    || (ContainsIngredientWord(objectName, "Quark") && ContainsIngredientWord(objectName, "Up"))
+                    || ContainsIngredientWord(objectName, "Up"))
                 {
                     return IngredientType.QuarkUp;
                 }
 
-                if (objectName.IndexOf("Electron", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsIngredientWord(objectName, "Electron"))
                     return IngredientType.Electron;
 
-                if (objectName.IndexOf("Proton", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsIngredientWord(objectName, "Proton"))
                     return IngredientType.Proton;
 
-                if (objectName.IndexOf("Neutron", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsIngredientWord(objectName, "Neutron"))
                     return IngredientType.Neutron;
 
-                if (objectName.IndexOf("Uranium", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsIngredientWord(objectName, "Uranium"))
                     return IngredientType.Uranium;
 
                 current = current.parent;
             }
 
             return IngredientType.None;
+        }
+
+        private bool ContainsIngredientWord(string objectName, string ingredientWord)
+        {
+            if (string.IsNullOrWhiteSpace(objectName) || string.IsNullOrWhiteSpace(ingredientWord))
+                return false;
+
+            int searchIndex = 0;
+
+            while (searchIndex < objectName.Length)
+            {
+                int index = objectName.IndexOf(ingredientWord, searchIndex, System.StringComparison.OrdinalIgnoreCase);
+
+                if (index < 0)
+                    return false;
+
+                int endIndex = index + ingredientWord.Length;
+                bool startsAtBoundary = index == 0 || !char.IsLetterOrDigit(objectName[index - 1]);
+                bool endsAtBoundary = endIndex >= objectName.Length || !char.IsLetterOrDigit(objectName[endIndex]);
+
+                if (startsAtBoundary && endsAtBoundary)
+                    return true;
+
+                searchIndex = index + 1;
+            }
+
+            return false;
+        }
+
+        private bool IsPlayerOrInteractorCollider(Collider other)
+        {
+            if (other == null)
+                return true;
+
+            if (IsIngredientInteractable(other) || IsMixerTool(other) || IsCardboxBaseCollider(other))
+                return false;
+
+            if (other is CharacterController)
+                return true;
+
+            if (other.GetComponentInParent<XROrigin>() != null)
+                return true;
+
+            if (other.GetComponentInParent<Camera>() != null)
+                return true;
+
+            if (other.GetComponentInParent<XRBaseInteractor>() != null)
+                return true;
+
+            return HasPlayerRigNameInParents(other.transform);
+        }
+
+        private bool IsIngredientInteractable(Collider other)
+        {
+            return HasIngredientMarker(other)
+                && (other.GetComponentInParent<XRGrabInteractable>() != null
+                    || other.GetComponentInChildren<XRGrabInteractable>() != null);
+        }
+
+        private bool HasIngredientMarker(Collider other)
+        {
+            return other != null
+                && (other.GetComponentInParent<IngredientBall>() != null
+                    || other.GetComponentInChildren<IngredientBall>() != null
+                    || other.GetComponentInParent<ParticlePacket>() != null
+                    || other.GetComponentInChildren<ParticlePacket>() != null);
+        }
+
+        private bool HasPlayerRigNameInParents(Transform source)
+        {
+            Transform current = source;
+
+            while (current != null)
+            {
+                string objectName = current.name;
+
+                if (!string.IsNullOrWhiteSpace(objectName)
+                    && (objectName.IndexOf("XR Origin", System.StringComparison.OrdinalIgnoreCase) >= 0
+                        || objectName.IndexOf("XR Rig", System.StringComparison.OrdinalIgnoreCase) >= 0
+                        || objectName.IndexOf("Main Camera", System.StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
+        private string BuildTransformPath(Transform source)
+        {
+            if (source == null)
+                return "null";
+
+            string path = source.name;
+            Transform current = source.parent;
+
+            while (current != null)
+            {
+                path = current.name + "/" + path;
+                current = current.parent;
+            }
+
+            return path;
         }
 
         /// <summary>

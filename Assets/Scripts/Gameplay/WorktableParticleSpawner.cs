@@ -178,10 +178,18 @@ namespace EDNXR.Gameplay
             if (panelRoot == null)
                 return;
 
+            SetQuantityFromNormalized(GetQuantityNormalizedFromWorldPoint(worldPoint));
+        }
+
+        public float GetQuantityNormalizedFromWorldPoint(Vector3 worldPoint)
+        {
+            if (panelRoot == null)
+                return GetQuantityNormalized();
+
             Vector3 localPoint = panelRoot.InverseTransformPoint(worldPoint);
             float minX = quantityBarOffset.x - quantityBarLength * 0.5f;
             float maxX = quantityBarOffset.x + quantityBarLength * 0.5f;
-            SetQuantityFromNormalized(Mathf.InverseLerp(minX, maxX, localPoint.x));
+            return Mathf.InverseLerp(minX, maxX, localPoint.x);
         }
 
         public float GetQuantityNormalized()

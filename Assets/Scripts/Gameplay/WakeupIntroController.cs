@@ -276,7 +276,10 @@ namespace EDNXR.Gameplay
             bool wasControllerEnabled = characterController != null && characterController.enabled;
 
             if (characterController != null)
+            {
+                VrCharacterControllerSafetyGuard.AllowTemporaryDisable("wakeup move camera", 0.35f);
                 characterController.enabled = false;
+            }
 
             if (xrRig != null)
             {
@@ -314,7 +317,10 @@ namespace EDNXR.Gameplay
                     bool wasControllerEnabled = characterController != null && characterController.enabled;
 
                     if (characterController != null)
+                    {
+                        VrCharacterControllerSafetyGuard.AllowTemporaryDisable("wakeup look at couch", 0.35f);
                         characterController.enabled = false;
+                    }
 
                     xrRig.MatchOriginUpCameraForward(Vector3.up, direction.normalized);
 

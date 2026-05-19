@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.XR.Interaction.Toolkit;
@@ -20,6 +21,8 @@ namespace EDNXR.Gameplay
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureMixerTool()
         {
+            VrCharacterControllerSafetyGuard.EnsureInScene();
+
             Transform[] sceneObjects = Object.FindObjectsOfType<Transform>(true);
             int preparedCount = 0;
 
@@ -62,9 +65,14 @@ namespace EDNXR.Gameplay
             grabInteractable.snapToColliderVolume = false;
             grabInteractable.throwOnDetach = false;
             grabInteractable.forceGravityOnDetach = true;
+            grabInteractable.allowGazeInteraction = false;
+            grabInteractable.allowGazeSelect = false;
+            grabInteractable.allowGazeAssistance = false;
             ConfigureGrabColliders(mixer, grabInteractable);
+            RefreshGrabColliderRegistration(grabInteractable);
             EnsureRecipeInteractor(mixer, grabInteractable);
             EnsureStabilityGuard(mixer);
+            EnsurePlayerContactDebug(mixer, grabInteractable);
             IgnorePlayerCollision(mixer);
 
             if (mixer.GetComponent<PcGrabbableObject>() == null)
@@ -238,6 +246,16 @@ namespace EDNXR.Gameplay
                 mixer.AddComponent<PaintCanStabilityGuard>();
         }
 
+        private static void EnsurePlayerContactDebug(GameObject mixer, XRGrabInteractable grabInteractable)
+        {
+            PaintCanPlayerContactDebug contactDebug = mixer.GetComponent<PaintCanPlayerContactDebug>();
+
+            if (contactDebug == null)
+                contactDebug = mixer.AddComponent<PaintCanPlayerContactDebug>();
+
+            contactDebug.Configure(grabInteractable);
+        }
+
         private static void ConfigureMeshCollidersForGrab(GameObject mixer)
         {
             MeshCollider[] meshColliders = mixer.GetComponentsInChildren<MeshCollider>(true);
@@ -309,11 +327,42 @@ namespace EDNXR.Gameplay
             Debug.Log($"[MixerToolBootstrap] {mixer.name} grab colliders: {grabInteractable.colliders.Count} (mesh={meshGrabColliders}, physical={physicalGrabColliders})");
         }
 
+        private static void RefreshGrabColliderRegistration(XRGrabInteractable grabInteractable)
+        {
+            if (grabInteractable == null || !Application.isPlaying || !grabInteractable.isActiveAndEnabled)
+                return;
+
+            // XRInteractionManager maps colliders when the interactable registers. The paintcan
+            // rebuilds its collider list at runtime, so re-enable to refresh that manager map.
+            grabInteractable.enabled = false;
+            grabInteractable.enabled = true;
+        }
+
         private static void IgnorePlayerCollision(GameObject mixer)
         {
             Collider[] mixerColliders = mixer.GetComponentsInChildren<Collider>(true);
             CharacterController[] characterControllers = Object.FindObjectsOfType<CharacterController>(true);
+            HashSet<Collider> playerColliders = new HashSet<Collider>();
             int ignoredPairs = 0;
+
+            for (int c = 0; c < characterControllers.Length; c++)
+            {
+                CharacterController characterController = characterControllers[c];
+
+                if (characterController == null)
+                    continue;
+
+                playerColliders.Add(characterController);
+
+                if (IsPlayerCharacterController(characterController))
+                    AddCollidersFromRoot(characterController.transform, playerColliders);
+            }
+
+            Camera mainCamera = Camera.main;
+            Transform cameraRigRoot = mainCamera != null ? FindPlayerRigRoot(mainCamera.transform) : null;
+
+            if (cameraRigRoot != null)
+                AddCollidersFromRoot(cameraRigRoot, playerColliders);
 
             for (int i = 0; i < mixerColliders.Length; i++)
             {
@@ -322,20 +371,20 @@ namespace EDNXR.Gameplay
                 if (mixerCollider == null)
                     continue;
 
-                for (int c = 0; c < characterControllers.Length; c++)
+                foreach (Collider playerCollider in playerColliders)
                 {
-                    CharacterController characterController = characterControllers[c];
-
-                    if (characterController == null)
+                    if (playerCollider == null || playerCollider.transform.IsChildOf(mixer.transform))
                         continue;
 
-                    Physics.IgnoreCollision(mixerCollider, characterController, true);
+                    Physics.IgnoreCollision(mixerCollider, playerCollider, true);
                     ignoredPairs++;
                 }
             }
 
             if (ignoredPairs > 0)
                 Debug.Log($"[MixerToolBootstrap] Ignored {ignoredPairs} paintcan/player collision pair(s) for {mixer.name}.");
+
+            VrPaintCanDebugLog.Write($"ignorePlayerCollision paintcan='{mixer.name}' mixerColliders={mixerColliders.Length} playerColliders={playerColliders.Count} ignoredPairs={ignoredPairs}");
         }
 
         private static bool IsPlayerCharacterController(CharacterController characterController)
@@ -354,6 +403,42 @@ namespace EDNXR.Gameplay
             }
 
             return false;
+        }
+
+        private static void AddCollidersFromRoot(Transform root, HashSet<Collider> target)
+        {
+            if (root == null)
+                return;
+
+            Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
+
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] != null)
+                    target.Add(colliders[i]);
+            }
+        }
+
+        private static Transform FindPlayerRigRoot(Transform source)
+        {
+            Transform current = source;
+
+            while (current != null)
+            {
+                if (IsPlayerRigName(current.name))
+                    return current;
+
+                current = current.parent;
+            }
+
+            return null;
+        }
+
+        private static bool IsPlayerRigName(string objectName)
+        {
+            return !string.IsNullOrWhiteSpace(objectName)
+                && (objectName.IndexOf("XR Origin", System.StringComparison.OrdinalIgnoreCase) >= 0
+                    || objectName.IndexOf("XR Rig", System.StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static Bounds GetRendererLocalBounds(Transform root)
